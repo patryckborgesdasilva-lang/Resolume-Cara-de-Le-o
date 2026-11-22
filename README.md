@@ -20,7 +20,9 @@ Não precisa instalar nada.
     (Letra, Legenda, Versículo, Título). O texto diminui sozinho se não couber.
   - 🎨 **Cor ou degradê**
   - 📷 **Câmera / placa de captura** (HDMI/USB aparecem como câmera)
+  - 📡 **Câmera NDI** (câmeras pela rede, via NDI Tools; veja abaixo)
   - 🖥 **Janela ou tela do computador** (ex.: PowerPoint, Holyrics, navegador)
+  - 🎶 **Holyrics ao vivo**: mostra o slide que está no ar no Holyrics, com o seu visual (veja abaixo)
 - **Janela do projetor** separada, sem bordas, em tela cheia.
 - **Passador de slides (clicker) funciona**: as setas e PageUp/PageDown trocam os slides da letra no ar.
 - **Blackout** com fade e **Master** para escurecer tudo.
@@ -29,7 +31,10 @@ Não precisa instalar nada.
 ## Como usar
 
 1. Baixe este repositório (botão **Code → Download ZIP**) e descompacte.
-2. Abra o arquivo **`index.html`** no **Google Chrome** ou **Microsoft Edge**.
+2. **Windows:** dê dois cliques em **`Iniciar-Windows.bat`**. Ele abre uma janela preta (a "ponte", deixe aberta)
+   e o programa no Chrome/Edge em `http://localhost:8090`.
+   **Mac/Linux:** com o [Node.js](https://nodejs.org) instalado, rode `./iniciar-mac-linux.sh`.
+   *(Sem Holyrics, dá também para abrir o `index.html` direto no Chrome/Edge.)*
 3. Ligue o projetor/TV como **tela estendida** (no Windows: `Win + P` → *Estender*).
 4. Clique em **📽 Abrir projetor**, arraste a janela que abriu para o projetor e dê **dois cliques** nela
    (ou tecle **F**) para ficar em tela cheia.
@@ -40,6 +45,50 @@ Não precisa instalar nada.
 6. Clique num clipe para colocá-lo no ar. **Botão direito** (ou o ✎) só seleciona para editar, sem ir pro ar.
 
 > Também dá para publicar no **GitHub Pages** (Settings → Pages → branch) e abrir pelo endereço do site.
+
+## Holyrics
+
+A integração usa o **API Server** do Holyrics.
+
+**1. No Holyrics:** menu **Arquivo → Configurações → API Server**
+- ative o servidor e anote a **porta**;
+- em **gerenciar permissões**, crie um **token** e libere pelo menos: `GetCurrentPresentation`, `ActionNext`,
+  `ActionPrevious`, `ActionGoToIndex`, `GetCurrentSchedule`, `GetLyricsPlaylist`, `SearchLyrics`, `GetLyrics`
+  (e `GetTokenInfo` para o botão de teste).
+
+**2. Aqui:** botão **Holyrics** na barra de cima → IP (use `127.0.0.1` se o Holyrics está no mesmo computador),
+porta e token → **Testar conexão**. A bolinha do botão fica verde quando está conectado.
+
+**O que dá para fazer:**
+
+| Recurso | Como |
+|---|---|
+| **Letra ao vivo** | Clique num `+` → *Holyrics ao vivo*. O clipe mostra o slide que está no ar no Holyrics, com fonte, contorno e posição definidos aqui, por cima dos seus fundos e vídeos. Tela preta/limpa no Holyrics some daqui também. |
+| **Controlar o Holyrics daqui** | Com o clipe Holyrics no ar, as setas e o passador avançam/voltam o Holyrics. O painel de baixo mostra os slides da música e um clique vai direto para o slide. |
+| **Importar músicas** | Janela Holyrics → *Músicas do culto* (lista do culto atual) ou *Buscar música* → *Importar*. Cada música vira um clipe de texto, já na ordem da música (com refrão repetido). Funciona sem depender do Holyrics durante o culto. |
+| **Importar fundos** | Janela Holyrics → *Fundos*: lista os vídeos e imagens da pasta de mídia do Holyrics (ou qualquer pasta) e importa com um clique, em qualidade total. Precisa da ponte (`Iniciar-Windows.bat`). |
+| **Tela inteira do Holyrics** | O Holyrics tem saída NDI: dá para trazer a tela dele (com os fundos dele) como uma câmera NDI. |
+
+> **Por que a "ponte"?** O navegador costuma bloquear um site que conversa direto com outro programa da rede
+> (proteção chamada CORS). O `Iniciar-Windows.bat` liga um pequeno servidor local (PowerShell, já vem no Windows)
+> que repassa as chamadas para o Holyrics. Ele só aceita conexões deste computador.
+>
+> A API do Holyrics não envia os arquivos de vídeo dos fundos nem o texto de versículos da Bíblia em lista
+> de slides. Por isso os fundos vêm da pasta de mídia, e versículos aparecem apenas no clipe *Holyrics ao vivo*
+> quando o Holyrics enviar o texto.
+
+## NDI (câmeras pela rede)
+
+O navegador não recebe NDI diretamente, então usamos a ferramenta gratuita da própria NDI que transforma uma fonte
+NDI em "webcam":
+
+1. Instale o **[NDI Tools](https://ndi.video/tools/)** no computador da projeção.
+2. Abra o **NDI Webcam Input** e escolha a câmera NDI (no Windows ele aceita mais de uma fonte).
+3. Aqui: clique num `+` → **📡 Câmera NDI (rede)**. O programa escolhe a fonte NDI sozinho; para trocar, use
+   *Dispositivo* no painel da direita (fontes NDI aparecem com 📡).
+
+Outra opção é o OBS com o plugin DistroAV + câmera virtual do OBS. Placas de captura HDMI/USB funcionam direto,
+como câmera comum.
 
 ## Atalhos
 
@@ -79,7 +128,11 @@ diante — é só apertar `1`, `2`, `3`…
 ## Arquivos
 
 ```
-index.html      → página principal (painel de controle)
-css/style.css   → visual
-js/app.js       → motor de camadas, letras, projetor e salvamento
+Iniciar-Windows.bat   → abre o programa com a ponte (Windows)
+iniciar-mac-linux.sh  → abre o programa com a ponte (Mac/Linux, precisa de Node.js)
+index.html            → página principal (painel de controle)
+css/style.css         → visual
+js/app.js             → camadas, letras, projetor, Holyrics, NDI e salvamento
+ponte/ponte.ps1       → ponte local em PowerShell (Windows)
+ponte/ponte.js        → a mesma ponte em Node.js
 ```

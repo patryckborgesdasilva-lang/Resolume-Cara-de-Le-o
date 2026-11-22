@@ -256,3 +256,32 @@ dialog li { margin: 4px 0; color: #c9cdd6; }
   .right { border-top: 1px solid var(--line); }
   .deck-wrap { max-height: none; }
 }
+
+/* ---------- Holyrics ---------- */
+.holy-btn .hdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #555; margin-right: 2px; }
+.holy-btn[data-state=ok] .hdot { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.holy-btn[data-state=error] .hdot { background: var(--live); }
+.tthumb.holy { background: linear-gradient(180deg, #1d1530, #000); }
+.holy-status { background: var(--panel2); border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin: 6px 0; font-size: 12px; }
+dialog.wide { max-width: 900px; }
+.dlg-title { display: flex; align-items: center; justify-content: space-between; }
+.dlg-title h2 { margin: 0 0 10px; }
+.holy-conn { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.holy-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin: 6px 0; }
+.holy-row > label:not(.f) { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.holy-row > label.grow, .holy-row > input { flex: 1; min-width: 200px; }
+.holy-row input[type=number] { width: 90px; }
+.holy-row .f.chk { margin: 0 0 4px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 8px; flex-wrap: wrap; }
+.tab { background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; padding: 7px 12px; cursor: pointer; color: var(--muted); }
+.tab.active { background: var(--panel2); border-color: var(--line); color: var(--text); }
+.holy-list { max-height: 46vh; overflow: auto; margin-top: 8px; }
+.holy-list-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.holy-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 4px; border-bottom: 1px solid var(--line); }
+.file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.file-tile { background: #000; border: 2px solid var(--line); border-radius: 6px; overflow: hidden; cursor: pointer; position: relative; }
+.file-tile:hover { border-color: var(--accent); }
+.file-tile img, .file-tile .ithumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: flex; position: static; }
+.file-tile.busy { opacity: .5; }
+.file-tile.done { border-color: var(--ok); }
+.popover hr + button { margin-top: 0; }

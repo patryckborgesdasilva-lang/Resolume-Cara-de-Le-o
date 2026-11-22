@@ -104,8 +104,10 @@
     [1024, 768, 'Projetor 4:3'], [1400, 1050, 'Projetor 4:3 (SXGA+)'], [1280, 800, 'Projetor 16:10'],
     [1920, 1200, '16:10 (WUXGA)'], [1080, 1920, 'Vertical 9:16'],
   ];
-  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera', screen: 'Captura de tela' };
-  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA' };
+  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera / NDI', screen: 'Captura de tela', holyrics: 'Holyrics ao vivo' };
+  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS' };
+  const isTextLike = (clip) => !!clip && (clip.type === 'text' || clip.type === 'holyrics');
+  const defaultHolyrics = () => ({ host: '127.0.0.1', port: 8091, token: '', arrows: true, useOrder: true, mediaDir: '' });
   const FIT_OPTS = [['cover', 'Preencher (corta bordas)'], ['contain', 'Encaixar (sem cortar)'], ['stretch', 'Esticar']];
 
   const defaultFx = () => ({ brightness: 100, contrast: 100, saturate: 100, hue: 0, blur: 0, zoom: 100 });
@@ -137,7 +139,7 @@
 
   function defaultProject() {
     const cols = 8;
-    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {} };
+    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {}, holyrics: defaultHolyrics() };
     // camadas ficam guardadas de baixo (índice 0) para cima
     const fundo = newLayer('Fundo', cols);
     const midia = newLayer('Mídia', cols);
@@ -161,6 +163,7 @@
     const d = defaultProject();
     for (const k of ['width', 'height', 'columns', 'master', 'masterFade']) if (typeof p[k] !== 'number') p[k] = d[k];
     p.clips = p.clips || {};
+    p.holyrics = Object.assign(defaultHolyrics(), p.holyrics);
     p.layers = Array.isArray(p.layers) && p.layers.length ? p.layers : d.layers;
     for (const l of p.layers) {
       l.fx = Object.assign(defaultFx(), l.fx);
@@ -173,8 +176,9 @@
     }
     for (const c of Object.values(p.clips)) {
       if (c.type === 'text') { c.style = Object.assign(defaultTextStyle(), c.style); c.slide = c.slide || 0; c.text = c.text || ''; }
+      if (c.type === 'holyrics') c.style = Object.assign(defaultTextStyle(), c.style);
       if (c.type === 'video') { c.speed = c.speed || 1; c.volume = c.volume == null ? 1 : c.volume; c.loop = c.loop !== false; }
-      if (!c.fit && c.type !== 'text' && c.type !== 'color') c.fit = 'cover';
+      if (!c.fit && !isTextLike(c) && c.type !== 'color') c.fit = 'cover';
     }
     return p;
   }
@@ -371,11 +375,11 @@
     if (L.current && L.current.clipId === clipId) {
       // já está no ar: só reconecta câmera/tela se caiu
       if ((clip.type === 'camera' || clip.type === 'screen') && !(m.stream && m.stream.active)) startStream(clip, m);
-      if (clip.type === 'text') rt.liveText = clipId;
+      if (isTextLike(clip)) rt.liveText = clipId;
       return;
     }
-    if (clip.type === 'text') {
-      if (!opts.keepSlide) clip.slide = 0;
+    if (isTextLike(clip)) {
+      if (clip.type === 'text' && !opts.keepSlide) clip.slide = 0;
       delete rt.textAnim[clipId];
       rt.liveText = clipId;
     }
@@ -426,7 +430,7 @@
     for (let i = P.layers.length - 1; i >= 0; i--) {
       const cur = layerRt(P.layers[i].id).current;
       const c = cur && P.clips[cur.clipId];
-      if (c && c.type === 'text') return c;
+      if (isTextLike(c)) return c;
     }
     return null;
   }
@@ -434,14 +438,14 @@
     const live = liveTextClip();
     if (live) return live;
     const sel = P.clips[ui.selClip];
-    return sel && sel.type === 'text' ? sel : null;
+    return isTextLike(sel) ? sel : null;
   }
 
   function setSlide(clip, idx) {
     const n = getSlides(clip).length;
     idx = clamp(idx, 0, Math.max(0, n - 1));
     if (idx === clip.slide) return;
-    if (isLive(clip.id) && (clip.style.transition || 0) > 0) rt.textAnim[clip.id] = { from: clip.slide, t0: performance.now() };
+    if (isLive(clip.id) && (clip.style.transition || 0) > 0) rt.textAnim[clip.id] = { fromText: clipText(clip), t0: performance.now() };
     else delete rt.textAnim[clip.id];
     clip.slide = idx;
     scheduleSave();
@@ -451,6 +455,11 @@
   function stepSlide(dir) {
     const clip = keyTextClip();
     if (!clip) { toast('Nenhuma letra no ar. Clique num clipe de texto primeiro.'); return; }
+    if (clip.type === 'holyrics') {
+      if (P.holyrics.arrows) Holy.call(dir > 0 ? 'ActionNext' : 'ActionPrevious').catch((e) => toast('Holyrics: ' + e.message));
+      else toast('O controle do Holyrics pelas setas está desligado (veja o clipe Holyrics).');
+      return;
+    }
     setSlide(clip, (clip.slide || 0) + dir);
   }
 
@@ -505,9 +514,12 @@
     return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
   }
 
-  function drawSlide(c, clip, idx, alpha, W, H) {
-    const slides = getSlides(clip);
-    const text = slides[idx];
+  function clipText(clip) {
+    if (clip.type === 'holyrics') return Holy.text;
+    return getSlides(clip)[clip.slide || 0] || '';
+  }
+
+  function drawSlide(c, clip, text, alpha, W, H) {
     if (!text || alpha <= 0.001) return;
     const s = clip.style, k = H / 1080;
     const lay = layoutText(c, clip, text, W, H);
@@ -552,19 +564,19 @@
   }
 
   function drawTextClip(c, clip, alpha, now, W, H) {
-    const idx = clip.slide || 0;
+    const text = clipText(clip);
     const anim = rt.textAnim[clip.id];
     if (anim) {
       const d = (clip.style.transition || 0) * 1000;
       const p = d > 0 ? Math.min(1, (now - anim.t0) / d) : 1;
       if (p < 1) {
-        drawSlide(c, clip, anim.from, alpha * (1 - p), W, H);
-        drawSlide(c, clip, idx, alpha * p, W, H);
+        drawSlide(c, clip, anim.fromText, alpha * (1 - p), W, H);
+        drawSlide(c, clip, text, alpha * p, W, H);
         return;
       }
       delete rt.textAnim[clip.id];
     }
-    drawSlide(c, clip, idx, alpha, W, H);
+    drawSlide(c, clip, text, alpha, W, H);
   }
 
   // =====================================================================
@@ -573,7 +585,7 @@
   function isOpaque(clip) {
     if (!clip) return false;
     if (clip.type === 'color') return true;
-    if (clip.type === 'text') return false;
+    if (isTextLike(clip)) return false;
     if (clip.fit === 'contain') return false;
     if (clip.type === 'image') return /jpe?g/i.test(clip.mime || '');
     return true;
@@ -614,6 +626,7 @@
         c.fillRect(0, 0, W, H);
         return true;
       case 'text':
+      case 'holyrics':
         drawTextClip(c, clip, alpha, now, W, H);
         return true;
       default: {
@@ -848,6 +861,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     let thumb;
     if (m && m.error) thumb = `<div class="ithumb" title="${esc(m.error)}">⚠️</div>`;
     else if (clip.type === 'text') thumb = `<div class="tthumb">${esc(getSlides(clip)[0] || '(vazio)')}</div>`;
+    else if (clip.type === 'holyrics') thumb = `<div class="tthumb holy">${esc(Holy.text || (Holy.status === 'ok' ? '(nada no ar no Holyrics)' : 'Holyrics desconectado'))}</div>`;
     else if (clip.type === 'color') thumb = `<div class="cthumb" style="background:${esc(colorCss(clip))}"></div>`;
     else if (clip.type === 'camera') thumb = `<div class="ithumb">📷</div>`;
     else if (clip.type === 'screen') thumb = `<div class="ithumb">🖥</div>`;
@@ -1199,6 +1213,15 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
       case 'color': placeClip(layer, col, newColorClip('Cor', '#1b3b8f', '#000000', true, 'vertical')); return;
       case 'camera': placeClip(layer, col, { id: uid(), type: 'camera', name: 'Câmera', deviceId: '', fit: 'cover', mirror: false }); return;
       case 'screen': placeClip(layer, col, { id: uid(), type: 'screen', name: 'Captura de tela', fit: 'contain' }); return;
+      case 'ndi': addNdiClip(layer, col); return;
+      case 'holyrics': {
+        const st = defaultTextStyle();
+        placeClip(layer, col, { id: uid(), type: 'holyrics', name: 'Holyrics ao vivo', style: st });
+        holyPoll();
+        if (!P.holyrics.token) openHolyDialog();
+        return;
+      }
+      case 'holyimport': openHolyDialog('musicas', layer.id); return;
     }
   });
   $('#fileInput').addEventListener('change', (e) => {
@@ -1214,7 +1237,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   // =====================================================================
   function slidesTarget() {
     const sel = P.clips[ui.selClip];
-    if (sel && sel.type === 'text') return sel;
+    if (isTextLike(sel)) return sel;
     return liveTextClip();
   }
 
@@ -1233,6 +1256,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
       </div>`;
       return;
     }
+    if (clip.type === 'holyrics') { renderHolyPanel(panel, clip); return; }
     const slides = getSlides(clip);
     const layer = layerOfClip(clip.id);
     panel.innerHTML = '';
@@ -1279,6 +1303,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     if (pill) { pill.textContent = live ? 'NO AR' : 'fora do ar'; pill.classList.toggle('live', live); }
     const btn = $('#spLive');
     if (btn) btn.textContent = live ? '✕ Tirar do ar' : '▶ Colocar no ar';
+    if (target.type === 'holyrics') { updateHolyPanel(scroll); return; }
     let cur = null;
     for (const e of $$('#slidesPanel .slide')) {
       const on = +e.dataset.i === target.slide;
@@ -1376,6 +1401,9 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
       case 'text':
         textControls(sec, clip);
         break;
+      case 'holyrics':
+        holyControls(sec, clip);
+        break;
       case 'camera': {
         const sel = h('select', {
           onchange: () => {
@@ -1389,13 +1417,13 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
             const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
             sel.innerHTML = '';
             sel.append(h('option', { value: '' }, 'Padrão do sistema'));
-            devs.forEach((d, i) => sel.append(h('option', { value: d.deviceId }, d.label || `Câmera ${i + 1}`)));
+            devs.forEach((d, i) => sel.append(h('option', { value: d.deviceId }, (/ndi/i.test(d.label) ? '📡 ' : '') + (d.label || `Câmera ${i + 1}`))));
             sel.value = clip.deviceId || '';
           } catch (_) { /* sem permissão */ }
         };
         fill();
         sec.append(field('Dispositivo', sel));
-        sec.append(h('div', { class: 'hint' }, 'Placas de captura HDMI/USB aparecem aqui como câmera. Se os nomes não aparecerem, coloque o clipe no ar uma vez e clique em “Atualizar lista”.'));
+        sec.append(h('div', { class: 'hint' }, 'Placas de captura HDMI/USB e fontes NDI (pelo “NDI Webcam Input” do NDI Tools) aparecem aqui como câmera. Se os nomes não aparecerem, coloque o clipe no ar uma vez e clique em “Atualizar lista”.'));
         sec.append(selectF('Ajuste', clip, 'fit', FIT_OPTS));
         sec.append(checkF('Espelhar imagem', clip, 'mirror'));
         sec.append(h('div', { class: 'btn-row' },
@@ -1421,8 +1449,6 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   }
 
   function textControls(sec, clip) {
-    const s = clip.style;
-    const onStyle = () => { renderSlidesDebounced(); };
     const ta = h('textarea', {
       rows: 10, value: clip.text, spellcheck: true,
       placeholder: 'Cole a letra aqui.\n\nDeixe uma linha em branco\nentre as estrofes.',
@@ -1437,7 +1463,12 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     });
     sec.append(h('div', { class: 'f full' }, ta));
     sec.append(h('div', { class: 'hint' }, 'Uma linha em branco = novo slide. O texto diminui sozinho se não couber.'));
+    styleControls(sec, clip);
+  }
 
+  function styleControls(sec, clip) {
+    const s = clip.style;
+    const onStyle = () => { renderSlidesDebounced(); };
     sec.append(h('h4', {}, 'Modelos rápidos'));
     sec.append(h('div', { class: 'btn-row' }, Object.keys(TEXT_PRESETS).map((name) =>
       h('button', { class: 'btn small', onclick: () => { Object.assign(s, TEXT_PRESETS[name]); scheduleSave(); renderInspector(); renderSlides(); } }, name))));
@@ -1599,6 +1630,458 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     if (rt.outWin && !rt.outWin.closed) { e.preventDefault(); e.returnValue = ''; }
   });
 
+
+  // =====================================================================
+  // Holyrics (API Server do Holyrics)
+  //   - "Holyrics ao vivo": espelha o slide que está no ar no Holyrics
+  //   - Importar músicas (culto atual / busca) como clipes de texto
+  //   - Importar fundos da pasta de mídia (precisa da ponte local)
+  // =====================================================================
+  const Holy = {
+    status: 'off', error: '', text: '', pres: null, slides: [], presKey: '',
+    bridge: false, bridgeKind: '', timer: null,
+    async call(action, params) {
+      const cfg = P.holyrics;
+      if (!cfg.token) throw new Error('configure o token do Holyrics');
+      const body = JSON.stringify(params || {});
+      const ctrl = new AbortController();
+      const to = setTimeout(() => ctrl.abort(), 5000);
+      let res;
+      try {
+        if (Holy.bridge) {
+          res = await fetch('ponte/holyrics', {
+            method: 'POST', signal: ctrl.signal,
+            headers: { 'Content-Type': 'application/json', 'X-Ponte': '1' },
+            body: JSON.stringify({ host: cfg.host, port: cfg.port, token: cfg.token, action, params: body }),
+          });
+        } else {
+          res = await fetch(`http://${cfg.host}:${cfg.port}/api/${encodeURIComponent(action)}?token=${encodeURIComponent(cfg.token)}`, {
+            method: 'POST', signal: ctrl.signal, headers: { 'Content-Type': 'application/json' }, body,
+          });
+        }
+      } catch (e) {
+        if (e.name === 'AbortError') throw new Error('o Holyrics não respondeu (tempo esgotado)');
+        throw new Error(Holy.bridge ? 'a ponte local não respondeu'
+          : 'o navegador não conseguiu falar com o Holyrics. Abra o programa pelo “Iniciar-Windows.bat” (ponte) e confira IP e porta');
+      } finally { clearTimeout(to); }
+      let j;
+      try { j = await res.json(); } catch (_) { throw new Error(`resposta inválida do Holyrics (HTTP ${res.status})`); }
+      if (!j || j.status !== 'ok') {
+        const er = j && j.error;
+        let msg = typeof er === 'string' ? er : '';
+        if (er && er.unauthorized_actions) msg = 'o token não tem permissão para: ' + [].concat(er.unauthorized_actions).join(', ');
+        if (msg === 'invalid token') msg = 'token inválido';
+        throw new Error(msg || 'erro desconhecido');
+      }
+      return j.data;
+    },
+  };
+
+  async function detectBridge() {
+    if (!/^https?:$/.test(location.protocol)) return;
+    try {
+      const r = await fetch('ponte/info', { headers: { 'X-Ponte': '1' } });
+      const j = await r.json();
+      Holy.bridge = !!(j && j.ok);
+      Holy.bridgeKind = (j && j.ponte) || '';
+    } catch (_) { Holy.bridge = false; }
+  }
+
+  function cleanHolyText(t) {
+    return String(t || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+      .replace(/&nbsp;/g, ' ').replace(/\r/g, '').replace(/\n[ \t]*\n+/g, '\n').trim();
+  }
+
+  const holyClips = () => Object.values(P.clips).filter((c) => c.type === 'holyrics');
+  let holyBusy = false;
+
+  async function holyPoll() {
+    clearTimeout(Holy.timer);
+    if (holyBusy) return;
+    if (!P.holyrics.token || !holyClips().length) {
+      if (Holy.status !== 'off') { Holy.status = 'off'; holyChanged(); }
+      Holy.timer = setTimeout(holyPoll, 1500);
+      return;
+    }
+    holyBusy = true;
+    let delay = 350;
+    try {
+      const d = await Holy.call('GetCurrentPresentation', { include_slides: true });
+      const was = Holy.status;
+      Holy.status = 'ok'; Holy.error = '';
+      applyPresentation(d);
+      if (was !== 'ok') holyChanged();
+    } catch (e) {
+      const changed = Holy.status !== 'error' || Holy.error !== e.message;
+      Holy.status = 'error'; Holy.error = e.message;
+      setHolyText('');
+      if (changed) holyChanged();
+      delay = 3000;
+    } finally { holyBusy = false; }
+    Holy.timer = setTimeout(holyPoll, delay);
+  }
+
+  function applyPresentation(d) {
+    Holy.pres = d || null;
+    if (d && Array.isArray(d.slides)) Holy.slides = d.slides;
+    else if (!d) Holy.slides = [];
+    let text = '';
+    if (d && (!d.slide_type || d.slide_type === 'default')) {
+      const n = d.slide_number;
+      const sl = Holy.slides.find((x) => x.number === n) || Holy.slides[n - 1];
+      text = sl ? cleanHolyText(sl.text) : '';
+    }
+    setHolyText(text);
+    const key = d ? [d.id, d.name, d.slide_number, d.total_slides, d.slide_type, Holy.slides.length].join('|') : 'none';
+    if (key !== Holy.presKey) { Holy.presKey = key; holyChanged(); }
+  }
+
+  function setHolyText(t) {
+    if (t === Holy.text) return;
+    const now = performance.now();
+    for (const c of holyClips()) {
+      if (isLive(c.id) && (c.style.transition || 0) > 0) rt.textAnim[c.id] = { fromText: Holy.text, t0: now };
+    }
+    Holy.text = t;
+    holyClips().forEach(refreshCell);
+  }
+
+  function holyStatusText() {
+    if (!P.holyrics.token) return 'Não configurado — clique em “Holyrics” na barra de cima.';
+    if (Holy.status === 'error') return '⚠ ' + Holy.error;
+    if (Holy.status !== 'ok') return 'Aguardando…';
+    const d = Holy.pres;
+    if (!d) return '✔ Conectado · nada sendo apresentado no Holyrics';
+    const tipos = { song: 'Música', verse: 'Bíblia', text: 'Texto', announcement: 'Aviso', image: 'Imagem', audio: 'Áudio' };
+    const st = d.slide_type && d.slide_type !== 'default' ? ` · (${{ black: 'tela preta', blank: 'tela limpa', wallpaper: 'papel de parede', final_slide: 'slide final' }[d.slide_type] || d.slide_type})` : '';
+    return `✔ ${tipos[d.type] || d.type || ''}${d.name ? ': ' + d.name : ''} · slide ${d.slide_number || '-'} de ${d.total_slides || '-'}${st}`;
+  }
+
+  function holyChanged() {
+    const b = $('#btnHoly');
+    if (b) b.dataset.state = !P.holyrics.token ? 'off' : Holy.status;
+    holyClips().forEach(refreshCell);
+    const st = $('#holyInspStatus');
+    if (st) st.textContent = holyStatusText();
+    const target = slidesTarget();
+    if (target && target.type === 'holyrics') updateHolyPanel(true);
+  }
+
+  function holyControls(sec, clip) {
+    sec.append(h('div', { class: 'holy-status', id: 'holyInspStatus' }, holyStatusText()));
+    sec.append(h('div', { class: 'hint' }, 'Mostra, com o estilo abaixo, o slide que está no ar no Holyrics. Opere o Holyrics normalmente ou use as setas / passador por aqui.'));
+    sec.append(checkF('Setas e passador controlam o Holyrics', P.holyrics, 'arrows'));
+    sec.append(h('div', { class: 'btn-row' }, h('button', { class: 'btn small', onclick: () => openHolyDialog() }, '⚙ Conexão com o Holyrics')));
+    styleControls(sec, clip);
+  }
+
+  function renderHolyPanel(panel, clip) {
+    panel.innerHTML = '';
+    panel.append(
+      h('div', { class: 'sp-head' },
+        h('b', {}, clip.name),
+        h('span', { class: 'pill', id: 'spPill' }),
+        h('span', { class: 'muted', id: 'holyInfo' }),
+        h('div', { class: 'spacer' }),
+        h('button', { class: 'btn small', title: 'Slide anterior no Holyrics', onclick: () => Holy.call('ActionPrevious').catch((e) => toast('Holyrics: ' + e.message)) }, '◀ Anterior'),
+        h('button', { class: 'btn small', title: 'Próximo slide no Holyrics', onclick: () => Holy.call('ActionNext').catch((e) => toast('Holyrics: ' + e.message)) }, 'Próximo ▶'),
+        h('button', {
+          class: 'btn small', id: 'spLive',
+          onclick: () => { const l = layerOfClip(clip.id); if (!l) return; if (isLive(clip.id)) clearLayer(l); else triggerClip(l, clip.id); },
+        })),
+      h('div', { class: 'slides', id: 'holySlides' }));
+    updateSlidesActive(false);
+  }
+
+  function updateHolyPanel(scroll) {
+    const grid = $('#holySlides');
+    if (!grid) return;
+    const target = slidesTarget();
+    const live = !!target && isLive(target.id);
+    const info = $('#holyInfo');
+    if (info) info.textContent = holyStatusText();
+    const d = Holy.pres;
+    const key = d ? `${d.id}|${d.name}|${Holy.slides.map((x) => x.text).join('\u0001').length}|${Holy.slides.length}` : '';
+    if (grid.dataset.key !== key) {
+      grid.dataset.key = key;
+      grid.innerHTML = '';
+      if (!d) grid.append(h('div', { class: 'muted' }, Holy.status === 'ok' ? 'Nada sendo apresentado no Holyrics. Abra uma música lá.' : 'Sem conexão com o Holyrics.'));
+      else if (!Holy.slides.length) grid.append(h('div', { class: 'muted' }, 'O Holyrics não envia a lista de slides deste tipo de apresentação (ex.: Bíblia). O texto no ar continua aparecendo.'));
+      Holy.slides.forEach((sl, i) => {
+        grid.append(h('div', {
+          class: 'slide', 'data-n': sl.number || i + 1, title: 'Ir para este slide no Holyrics',
+          onclick: () => {
+            Holy.call('ActionGoToIndex', { index: (sl.number || i + 1) - 1 }).catch((e) => toast('Holyrics: ' + e.message));
+            const l = target && layerOfClip(target.id);
+            if (l && !isLive(target.id)) triggerClip(l, target.id);
+          },
+        }, h('span', { class: 'n' }, `${sl.number || i + 1}${sl.slide_description ? ' · ' + sl.slide_description : ''}`), cleanHolyText(sl.text)));
+      });
+    }
+    let cur = null;
+    for (const e of $$('.slide', grid)) {
+      const on = !!d && +e.dataset.n === d.slide_number && (!d.slide_type || d.slide_type === 'default');
+      e.classList.toggle('current', on);
+      e.classList.toggle('onair', on && live);
+      if (on) cur = e;
+    }
+    if (scroll && cur) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // ---------- janela de conexão / importação ----------
+  const holyUi = { tab: 'musicas', layerId: null };
+
+  function defaultLayerFor(tab) {
+    if (tab === 'fundos') return P.layers[0].id;
+    const l = P.layers.slice().reverse().find((x) => /letra/i.test(x.name)) || P.layers[P.layers.length - 1];
+    return l.id;
+  }
+
+  function openHolyDialog(tab, layerId) {
+    if (tab) holyUi.tab = tab;
+    holyUi.layerId = layerId || defaultLayerFor(holyUi.tab);
+    renderHolyDialog();
+    const dlg = $('#holyDlg');
+    if (!dlg.open) dlg.showModal();
+  }
+
+  function renderHolyDialog() {
+    const body = $('#holyBody');
+    const cfg = P.holyrics;
+    body.innerHTML = '';
+    const testOut = h('div', { class: 'hint', id: 'holyTest' }, P.holyrics.token ? holyStatusText() : '');
+    const conn = h('section', { class: 'holy-conn' },
+      h('div', { class: 'holy-row' },
+        h('label', {}, 'IP do computador do Holyrics', (() => { const i = h('input', { type: 'text', value: cfg.host, placeholder: '127.0.0.1', oninput: () => { cfg.host = i.value.trim(); scheduleSave(); } }); return i; })()),
+        h('label', {}, 'Porta', (() => { const i = h('input', { type: 'number', value: cfg.port, min: 1, max: 65535, oninput: () => { cfg.port = parseInt(i.value, 10) || 8091; scheduleSave(); } }); return i; })()),
+        h('label', { class: 'grow' }, 'Token', (() => { const i = h('input', { type: 'text', value: cfg.token, placeholder: 'token criado no API Server do Holyrics', oninput: () => { cfg.token = i.value.trim(); scheduleSave(); holyChanged(); } }); return i; })()),
+        h('button', {
+          class: 'btn primary', onclick: async () => {
+            testOut.textContent = 'Testando…';
+            try {
+              const v = await Holy.call('GetTokenInfo').catch(() => Holy.call('GetVersion'));
+              testOut.textContent = `✔ Conectado ao Holyrics${v && v.version ? ' ' + v.version : ''}.` + (v && v.permissions ? ` Permissões do token: ${v.permissions}` : '');
+              holyPoll();
+            } catch (e) { testOut.textContent = '⚠ ' + e.message; }
+          },
+        }, 'Testar conexão')),
+      testOut,
+      h('div', { class: 'hint' },
+        'No Holyrics: menu Arquivo → Configurações → API Server. Ative o servidor, anote a porta e crie um token em “gerenciar permissões” ',
+        '(libere pelo menos: GetCurrentPresentation, ActionNext, ActionPrevious, ActionGoToIndex, GetCurrentSchedule, GetLyricsPlaylist, SearchLyrics, GetLyrics). ',
+        'Se o Holyrics estiver neste mesmo computador, use o IP 127.0.0.1.'),
+      h('div', { class: 'hint' }, Holy.bridge
+        ? `✔ Ponte local ativa (${Holy.bridgeKind}). A conexão com o Holyrics passa por ela.`
+        : '⚠ Ponte local desligada. O navegador pode bloquear a conexão direta com o Holyrics. Para garantir, abra o programa pelo arquivo “Iniciar-Windows.bat”.'));
+
+    const tabs = h('div', { class: 'tabs' },
+      [['musicas', '🎵 Músicas do culto'], ['buscar', '🔎 Buscar música'], ['fundos', '🖼 Fundos (pasta de mídia)']].map(([id, label]) =>
+        h('button', { class: 'tab' + (holyUi.tab === id ? ' active' : ''), onclick: () => { holyUi.tab = id; holyUi.layerId = defaultLayerFor(id); renderHolyDialog(); } }, label)));
+
+    const layerSel = h('select', { onchange: () => { holyUi.layerId = layerSel.value; } },
+      P.layers.slice().reverse().map((l) => h('option', { value: l.id }, l.name)));
+    layerSel.value = holyUi.layerId;
+    const opts = h('div', { class: 'holy-row' }, h('label', {}, 'Colocar na camada', layerSel),
+      holyUi.tab !== 'fundos' ? checkF('Usar a ordem da música no Holyrics (repete o refrão)', cfg, 'useOrder') : null);
+
+    const list = h('div', { class: 'holy-list' });
+    body.append(conn, tabs, opts);
+
+    if (holyUi.tab === 'musicas') {
+      body.append(h('div', { class: 'btn-row' }, h('button', { class: 'btn small', onclick: () => loadSchedule(list) }, '↻ Carregar músicas do culto')), list);
+      if (cfg.token) loadSchedule(list);
+    } else if (holyUi.tab === 'buscar') {
+      const q = h('input', { type: 'text', placeholder: 'Título ou artista', onkeydown: (e) => { if (e.key === 'Enter') go(); } });
+      const go = async () => {
+        list.textContent = 'Buscando…';
+        try { renderSongList(list, (await Holy.call('SearchLyrics', { input: q.value.trim() })) || []); } catch (e) { list.textContent = '⚠ ' + e.message; }
+      };
+      body.append(h('div', { class: 'holy-row' }, q, h('button', { class: 'btn small', onclick: go }, 'Buscar')), list);
+      setTimeout(() => q.focus(), 30);
+    } else {
+      body.append(renderFundosTab(list), list);
+    }
+  }
+
+  async function loadSchedule(list) {
+    list.textContent = 'Carregando…';
+    try {
+      let songs = [], origem = '';
+      try {
+        const sch = await Holy.call('GetCurrentSchedule', { include_lyrics_slides: true });
+        songs = (sch && sch.lyrics_playlist) || [];
+        origem = sch && sch.name ? `${sch.name}${sch.datetime ? ' · ' + sch.datetime : ''}` : '';
+      } catch (_) { /* tenta a lista de músicas */ }
+      if (!songs.length) { songs = (await Holy.call('GetLyricsPlaylist')) || []; origem = 'Lista de músicas'; }
+      renderSongList(list, songs, origem);
+    } catch (e) { list.textContent = '⚠ ' + e.message; }
+  }
+
+  function renderSongList(list, songs, origem) {
+    list.innerHTML = '';
+    songs = [].concat(songs || []).filter((x) => x && x.id);
+    if (!songs.length) { list.append(h('div', { class: 'muted' }, 'Nenhuma música encontrada.')); return; }
+    const all = h('button', {
+      class: 'btn small primary', onclick: async () => {
+        all.disabled = true;
+        let ok = 0;
+        for (const s of songs) { all.textContent = `Importando ${ok + 1}/${songs.length}…`; if (await importSong(s, true)) ok++; }
+        all.textContent = `✔ ${ok} importadas`;
+        renderDeck();
+        toast(`${ok} música(s) importada(s) do Holyrics.`);
+      },
+    }, `⬇ Importar todas (${songs.length})`);
+    list.append(h('div', { class: 'holy-list-head' }, h('span', { class: 'muted' }, origem || ''), all));
+    for (const s of songs) {
+      const btn = h('button', {
+        class: 'btn small', onclick: async () => {
+          btn.disabled = true; btn.textContent = '…';
+          const ok = await importSong(s, false);
+          btn.textContent = ok ? '✔ Importada' : 'Tentar de novo';
+          btn.disabled = ok;
+        },
+      }, '⬇ Importar');
+      list.append(h('div', { class: 'holy-item' },
+        h('div', {}, h('b', {}, s.title || '(sem título)'), s.artist ? h('span', { class: 'muted' }, ' — ' + s.artist) : null),
+        btn));
+    }
+  }
+
+  async function fetchSongFull(song) {
+    if (Array.isArray(song.slides) && song.slides.length) return song;
+    let full = await Holy.call('GetLyrics', { id: song.id });
+    if (!full || !Array.isArray(full.slides) || !full.slides.length) {
+      full = await Holy.call('GetLyrics', { id: song.id, fields: 'id,title,artist,slides,order' });
+    }
+    return Object.assign({}, song, full || {});
+  }
+
+  function songToText(song) {
+    const slides = (song.slides || []).map((x) => cleanHolyText(x && x.text));
+    let seq = slides;
+    if (P.holyrics.useOrder && song.order) {
+      const idx = String(song.order).split(',').map((n) => parseInt(n, 10) - 1).filter((i) => i >= 0 && i < slides.length);
+      if (idx.length) seq = idx.map((i) => slides[i]);
+    }
+    return seq.filter(Boolean).join('\n\n');
+  }
+
+  async function importSong(song, silent) {
+    try {
+      const full = await fetchSongFull(song);
+      const text = songToText(full);
+      if (!text) throw new Error('a música não tem slides');
+      const layer = layerById(holyUi.layerId) || P.layers[P.layers.length - 1];
+      let col = layer.clips.findIndex((x) => !x);
+      if (col < 0) { col = P.columns; addColumns(1); }
+      const clip = newTextClip(full.title || song.title || 'Música', text);
+      // usa o mesmo visual dos outros textos da camada
+      const ref = layer.clips.map((id) => P.clips[id]).find((c) => c && c.type === 'text');
+      if (ref) clip.style = JSON.parse(JSON.stringify(ref.style));
+      clip.holyricsId = song.id;
+      P.clips[clip.id] = clip;
+      layer.clips[col] = clip.id;
+      scheduleSave();
+      if (!silent) { renderDeck(); toast(`“${clip.name}” importada na camada ${layer.name}.`); }
+      return true;
+    } catch (e) {
+      toast(`Não foi possível importar “${song.title || ''}”: ${e.message}`, 6000);
+      return false;
+    }
+  }
+
+  function renderFundosTab(list) {
+    const cfg = P.holyrics;
+    if (!Holy.bridge) {
+      return h('div', { class: 'empty-hint' },
+        h('p', {}, 'A API do Holyrics não envia os arquivos de vídeo e imagem dos fundos. Para trazer os fundos com qualidade total há dois jeitos:'),
+        h('ol', {},
+          h('li', {}, 'Abra o programa pelo “Iniciar-Windows.bat” (ponte local). Esta aba passa a listar os vídeos e imagens da pasta de mídia do Holyrics para importar com um clique.'),
+          h('li', {}, 'Ou abra a pasta de mídia do Holyrics no Explorer e arraste os arquivos direto para as células da grade.')));
+    }
+    const dir = h('input', { type: 'text', value: cfg.mediaDir, placeholder: 'Pasta de mídia do Holyrics (vazio = tentar encontrar sozinho)', oninput: () => { cfg.mediaDir = dir.value.trim(); scheduleSave(); } });
+    const go = async () => {
+      list.textContent = 'Procurando arquivos…';
+      try {
+        const r = await fetch('ponte/arquivos?dir=' + encodeURIComponent(cfg.mediaDir), { headers: { 'X-Ponte': '1' } });
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error || 'pasta não encontrada');
+        if (!cfg.mediaDir && j.dir) { cfg.mediaDir = j.dir; dir.value = j.dir; scheduleSave(); }
+        renderFileGrid(list, [].concat(j.files || []), j.truncated);
+      } catch (e) { list.textContent = '⚠ ' + e.message; }
+    };
+    if (cfg.mediaDir) setTimeout(go, 0);
+    return h('div', {},
+      h('div', { class: 'holy-row' }, h('label', { class: 'grow' }, 'Pasta', dir), h('button', { class: 'btn small', onclick: go }, 'Listar arquivos')),
+      h('div', { class: 'hint' }, 'Dica: no Holyrics, clique com o botão direito num vídeo/imagem e escolha abrir a pasta para descobrir o caminho. Qualquer pasta com vídeos e imagens funciona.'));
+  }
+
+  function renderFileGrid(list, files, truncated) {
+    list.innerHTML = '';
+    if (!files.length) { list.append(h('div', { class: 'muted' }, 'Nenhum vídeo ou imagem nesta pasta.')); return; }
+    if (truncated) list.append(h('div', { class: 'hint' }, `Mostrando os primeiros ${files.length} arquivos.`));
+    const grid = h('div', { class: 'file-grid' });
+    for (const f of files) {
+      const src = 'ponte/arquivo?path=' + encodeURIComponent(f.path);
+      const tile = h('div', { class: 'file-tile', title: f.path },
+        f.kind === 'image' ? h('img', { src, loading: 'lazy', alt: '' }) : h('div', { class: 'ithumb' }, '🎬'),
+        h('div', { class: 'cname' }, f.name));
+      tile.addEventListener('click', async () => {
+        if (tile.classList.contains('busy')) return;
+        tile.classList.add('busy');
+        try {
+          const r = await fetch(src);
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          const blob = await r.blob();
+          const file = new File([blob], f.name, { type: blob.type });
+          const layer = layerById(holyUi.layerId) || P.layers[0];
+          const col = Math.max(0, layer.clips.findIndex((x) => !x));
+          importFiles([file], layer, col < 0 ? P.columns : col);
+          tile.classList.add('done');
+          toast(`“${f.name}” importado na camada ${layer.name}.`);
+        } catch (e) { toast('Falha ao importar: ' + e.message); }
+        tile.classList.remove('busy');
+      });
+      grid.append(tile);
+    }
+    list.append(grid);
+  }
+
+  $('#btnHoly').addEventListener('click', () => openHolyDialog());
+  $('#holyDlg').addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target === e.currentTarget) $('#holyDlg').close(); });
+
+  // =====================================================================
+  // NDI (via NDI Webcam Input do NDI Tools)
+  // =====================================================================
+  async function addNdiClip(layer, col) {
+    const clip = { id: uid(), type: 'camera', name: 'NDI', deviceId: '', fit: 'cover', mirror: false };
+    placeClip(layer, col, clip);
+    try {
+      const list = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      let devs = await list();
+      if (!devs.some((d) => d.label)) {
+        const s = await navigator.mediaDevices.getUserMedia({ video: true });
+        s.getTracks().forEach((t) => t.stop());
+        devs = await list();
+      }
+      const ndi = devs.filter((d) => /ndi/i.test(d.label));
+      if (!ndi.length) {
+        toast('Nenhuma fonte NDI encontrada. Instale o NDI Tools e abra o “NDI Webcam Input” (veja ☰ → Atalhos e ajuda → NDI).', 9000);
+        return;
+      }
+      const used = new Set(Object.values(P.clips).filter((c) => c.type === 'camera' && c.id !== clip.id).map((c) => c.deviceId));
+      const pick = ndi.find((d) => !used.has(d.deviceId)) || ndi[0];
+      clip.deviceId = pick.deviceId;
+      clip.name = pick.label.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$/i, '');
+      refreshCell(clip);
+      if (ui.selClip === clip.id) renderInspector();
+      scheduleSave();
+      toast('Fonte NDI selecionada: ' + clip.name);
+    } catch (_) {
+      toast('O navegador não deu acesso às câmeras. Clique no ícone de câmera na barra de endereço e permita.', 7000);
+    }
+  }
+
   // =====================================================================
   // Inicialização
   // =====================================================================
@@ -1613,8 +2096,10 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     keepAwake();
     schedule();
     if (!saved) saveNow();
+    await detectBridge();
+    holyPoll();
     // expõe para depuração no console
-    window.CDL = { get project() { return P; }, rt, triggerColumn, clearAll };
+    window.CDL = { get project() { return P; }, rt, Holy, triggerColumn, clearAll };
   }
   init();
 })();

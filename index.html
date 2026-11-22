@@ -12,6 +12,7 @@
 
     <button id="btnOutput" class="btn primary" title="Abre a janela que vai para o projetor">📽 Abrir projetor</button>
     <span id="outStatus" class="status off">Projetor fechado</span>
+    <button id="btnHoly" class="btn holy-btn" data-state="off" title="Conexão com o Holyrics: letras ao vivo, importar músicas e fundos"><span class="hdot"></span> Holyrics</button>
 
     <label class="field">Resolução
       <select id="selRes" title="Resolução da saída (use a do seu projetor/TV)"></select>
@@ -51,7 +52,11 @@
     <button data-add="text">🔤 Texto / Letra de música</button>
     <button data-add="color">🎨 Cor ou degradê</button>
     <button data-add="camera">📷 Câmera / placa de captura</button>
+    <button data-add="ndi">📡 Câmera NDI (rede)</button>
     <button data-add="screen">🖥 Janela ou tela do computador</button>
+    <hr>
+    <button data-add="holyrics">🎶 Holyrics ao vivo (segue o slide do Holyrics)</button>
+    <button data-add="holyimport">⬇ Importar músicas/fundos do Holyrics…</button>
   </div>
 
   <!-- Menu principal -->
@@ -78,6 +83,20 @@
       <tr><td><kbd>Delete</kbd></td><td>Remove o clipe selecionado</td></tr>
       <tr><td><kbd>F</kbd> / duplo clique</td><td>(na janela do projetor) Tela cheia</td></tr>
     </table>
+    <h3>Holyrics</h3>
+    <ul>
+      <li>No Holyrics: <b>Arquivo → Configurações → API Server</b>. Ative, anote a porta e crie um <b>token</b> em “gerenciar permissões”.</li>
+      <li>Aqui: botão <b>Holyrics</b> na barra de cima → preencha IP, porta e token → <b>Testar conexão</b>.</li>
+      <li><b>Holyrics ao vivo</b> (clique num <b>+</b>): mostra o slide que está no ar no Holyrics com o seu visual, por cima dos seus fundos. As setas/passador avançam o Holyrics.</li>
+      <li><b>Importar</b>: traz as músicas do culto (ou busca) como clipes de texto, e os vídeos/imagens da pasta de mídia do Holyrics.</li>
+      <li>Para a conexão funcionar sempre, abra o programa pelo <b>Iniciar-Windows.bat</b> (ele liga a “ponte” local).</li>
+    </ul>
+    <h3>NDI (câmeras pela rede)</h3>
+    <ul>
+      <li>Instale o <b>NDI Tools</b> (gratuito) e abra o <b>NDI Webcam Input</b>. Escolha nele a câmera NDI — ela vira uma “webcam” no computador.</li>
+      <li>Aqui: clique num <b>+</b> → <b>Câmera NDI</b>. O programa escolhe a fonte NDI sozinho (ou troque em “Dispositivo”).</li>
+      <li>O Holyrics também tem saída NDI: dá para trazer a tela inteira dele (com os fundos) do mesmo jeito.</li>
+    </ul>
     <h3>Como funciona</h3>
     <ul>
       <li><b>Camadas</b>: a de cima fica por cima. Ex.: Fundo (vídeo) → Mídia (logo/avisos) → Letras.</li>
@@ -87,6 +106,11 @@
       <li>Tudo é salvo automaticamente neste navegador (inclusive os vídeos).</li>
     </ul>
     <div class="dlg-actions"><button class="btn primary" data-close>Fechar</button></div>
+  </dialog>
+
+  <dialog id="holyDlg" class="wide">
+    <div class="dlg-title"><h2>🎶 Holyrics</h2><button class="btn small" data-close>Fechar</button></div>
+    <div id="holyBody"></div>
   </dialog>
 
   <script src="js/app.js"></script>

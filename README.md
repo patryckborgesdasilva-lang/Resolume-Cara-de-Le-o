@@ -46,6 +46,36 @@ Não precisa instalar nada.
 
 > Também dá para publicar no **GitHub Pages** (Settings → Pages → branch) e abrir pelo endereço do site.
 
+## Saídas
+
+Botão **🖥 Saídas** na barra de cima.
+
+### HDMI (projetor / TV)
+1. Ligue o cabo HDMI e deixe o Windows em **Estender** (`Win + P`).
+2. **Abrir janela do projetor** → **Detectar telas** → **Enviar projetor para esta tela**
+   (ou arraste a janela até o projetor).
+3. Dê **dois cliques** na imagem (ou tecle **F**) para tela cheia.
+4. Na mesma lista, **Usar esta resolução** deixa o programa com a resolução exata da tela.
+
+**Imagem de teste**: mostra grade, barras de cor, borda vermelha e área segura em todas as saídas, para ajustar
+o foco, o enquadramento e o corte (overscan) da TV/projetor. O botão *Saídas* fica vermelho enquanto ela está ligada.
+
+### Navegador / OBS
+Com o programa aberto pelo `Iniciar-Windows.bat`, a janela *Saídas* mostra dois endereços:
+
+| Endereço | O que mostra | Uso no OBS |
+|---|---|---|
+| `http://localhost:8090/saida.html` | **Programa completo**, igual ao projetor (ao vivo, por WebRTC) | Fonte de vídeo da cena |
+| `http://localhost:8090/saida.html?letras` | **Só as letras, com fundo transparente** (com as transições) | Por cima da câmera na transmissão |
+
+No OBS: **Fontes → + → Navegador** → cole o endereço → largura e altura iguais à resolução do programa
+(ex.: 1920 × 1080). A qualidade do programa completo (alta 30/60 fps, média 720p, leve 540p) é escolhida na
+janela *Saídas*. Se o painel for recarregado, o OBS reconecta sozinho em poucos segundos.
+
+- A janela de controle precisa ficar aberta, e o OBS precisa estar **no mesmo computador**.
+- A saída de letras também segue o clipe **Holyrics ao vivo** (letra do Holyrics por cima da câmera no OBS).
+- Sem a ponte, ainda dá para usar no OBS a fonte **Captura de janela** na janela *Projetor — Cara de Leão*.
+
 ## Holyrics
 
 A integração usa o **API Server** do Holyrics.
@@ -131,6 +161,7 @@ diante — é só apertar `1`, `2`, `3`…
 Iniciar-Windows.bat   → abre o programa com a ponte (Windows)
 iniciar-mac-linux.sh  → abre o programa com a ponte (Mac/Linux, precisa de Node.js)
 index.html            → página principal (painel de controle)
+saida.html            → saída para o OBS / navegador (js/saida.js)
 css/style.css         → visual
 js/app.js             → camadas, letras, projetor, Holyrics, NDI e salvamento
 ponte/ponte.ps1       → ponte local em PowerShell (Windows)

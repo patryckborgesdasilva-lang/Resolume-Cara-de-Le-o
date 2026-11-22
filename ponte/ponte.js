@@ -6,6 +6,7 @@
  *   - serve o programa em http://localhost:8090
  *   - repassa as chamadas para a API do Holyrics (o navegador sozinho pode ser bloqueado por CORS)
  *   - lista e entrega vídeos/imagens de uma pasta (ex.: a pasta de mídia do Holyrics)
+ *   - liga a saída para o OBS (saida.html) ao painel de controle
  *
  * Uso:  node ponte/ponte.js        (porta diferente: PORTA=9000 node ponte/ponte.js)
  */
@@ -67,6 +68,51 @@ async function holyrics(req, res) {
   pr.on('timeout', () => pr.destroy(new Error('tempo esgotado')));
   pr.on('error', (e) => { if (!res.headersSent) json(res, 502, { status: 'error', error: 'o Holyrics não respondeu (' + e.message + '). Confira se o API Server está ativo, o IP e a porta.' }); });
   pr.end(corpo);
+}
+
+// ---------- caixas de mensagem (conexão do OBS) e estados (imagem das letras) ----------
+const caixas = new Map();   // nome -> [mensagens JSON]
+const estados = new Map();  // nome -> { v, bytes, tipo, meta }
+const nomeValido = (n) => /^[A-Za-z0-9_-]{1,40}$/.test(n);
+
+function lerBytes(req, limite = 30e6) {
+  return new Promise((resolve, reject) => {
+    const partes = [];
+    let total = 0;
+    req.on('data', (c) => { total += c.length; if (total > limite) { reject(new Error('muito grande')); req.destroy(); } else partes.push(c); });
+    req.on('end', () => resolve(Buffer.concat(partes)));
+    req.on('error', reject);
+  });
+}
+
+async function caixa(nome, req, res) {
+  if (!nomeValido(nome)) return json(res, 400, { ok: false });
+  if (req.method === 'POST') {
+    const txt = (await lerBytes(req, 1e6)).toString('utf8');
+    if (!caixas.has(nome)) { if (caixas.size > 200) caixas.clear(); caixas.set(nome, []); }
+    const q = caixas.get(nome);
+    q.push(txt);
+    while (q.length > 50) q.shift();
+    return json(res, 200, { ok: true });
+  }
+  const q = caixas.get(nome) || [];
+  caixas.set(nome, []);
+  return json(res, 200, '[' + q.join(',') + ']');
+}
+
+async function estado(nome, u, req, res) {
+  if (!nomeValido(nome)) return json(res, 400, { ok: false });
+  if (req.method === 'POST') {
+    const bytes = await lerBytes(req);
+    const ant = estados.get(nome);
+    const v = ant ? ant.v + 1 : 1;
+    estados.set(nome, { v, bytes, tipo: req.headers['content-type'] || 'application/octet-stream', meta: String(req.headers['x-meta'] || '') });
+    return json(res, 200, { ok: true, v });
+  }
+  const e = estados.get(nome);
+  if (!e || u.searchParams.get('v') === String(e.v)) { res.writeHead(204, { 'Cache-Control': 'no-store' }); return res.end(); }
+  res.writeHead(200, { 'Content-Type': e.tipo, 'Content-Length': e.bytes.length, 'X-Versao': String(e.v), 'X-Meta': e.meta, 'Cache-Control': 'no-store' });
+  res.end(e.bytes);
 }
 
 // ---------- arquivos de mídia ----------
@@ -149,6 +195,8 @@ const servidor = http.createServer((req, res) => {
       if (p === '/ponte/info') return json(res, 200, { ok: true, ponte: 'node', versao: 1 });
       if (p === '/ponte/holyrics' && req.method === 'POST') return holyrics(req, res);
       if (p === '/ponte/arquivos') return arquivos(u, res);
+      if (p.startsWith('/ponte/caixa/')) return caixa(p.slice(13), req, res).catch((e) => json(res, 500, { ok: false, error: e.message }));
+      if (p.startsWith('/ponte/estado/')) return estado(p.slice(14), u, req, res).catch((e) => json(res, 500, { ok: false, error: e.message }));
       return json(res, 404, { ok: false });
     }
     return estatico(u, res);

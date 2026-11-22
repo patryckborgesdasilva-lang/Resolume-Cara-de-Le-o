@@ -3,6 +3,7 @@
 #  - serve o programa em http://localhost:8090
 #  - repassa as chamadas para a API do Holyrics (o navegador sozinho pode ser bloqueado por CORS)
 #  - lista e entrega vídeos/imagens de uma pasta (ex.: a pasta de mídia do Holyrics)
+#  - liga a saída para o OBS (saida.html) ao painel de controle
 #
 # Normalmente é aberto pelo arquivo "Iniciar-Windows.bat".
 
@@ -57,6 +58,66 @@ function Enviar-Arquivo($ctx, [string]$caminho) {
 function Ler-Corpo($req) {
   $sr = New-Object IO.StreamReader($req.InputStream, $Utf8)
   try { return $sr.ReadToEnd() } finally { $sr.Close() }
+}
+
+function Enviar-Vazio($ctx) {
+  $ctx.Response.StatusCode = 204
+  $ctx.Response.Headers['Cache-Control'] = 'no-store'
+  $ctx.Response.OutputStream.Close()
+}
+
+function Ler-Bytes($req) {
+  $ms = New-Object IO.MemoryStream
+  $req.InputStream.CopyTo($ms)
+  return , $ms.ToArray()
+}
+
+# Caixas de mensagem (conexão do OBS) e estados (imagem das letras)
+$Caixas = @{}
+$Estados = @{}
+
+function Tratar-Caixa($ctx, [string]$nome) {
+  if ($nome -notmatch '^[A-Za-z0-9_-]{1,40}$') { Enviar-Json $ctx 400 '{"ok":false}'; return }
+  if ($ctx.Request.HttpMethod -eq 'POST') {
+    $txt = Ler-Corpo $ctx.Request
+    if (-not $Caixas.ContainsKey($nome)) {
+      if ($Caixas.Count -gt 200) { $Caixas.Clear() }
+      $Caixas[$nome] = New-Object 'System.Collections.Generic.List[string]'
+    }
+    $q = $Caixas[$nome]
+    $q.Add($txt)
+    while ($q.Count -gt 50) { $q.RemoveAt(0) }
+    Enviar-Json $ctx 200 '{"ok":true}'
+  } else {
+    $saida = '[]'
+    if ($Caixas.ContainsKey($nome)) {
+      $q = $Caixas[$nome]
+      if ($q.Count -gt 0) { $saida = '[' + ($q -join ',') + ']' }
+      $q.Clear()
+    }
+    Enviar-Json $ctx 200 $saida
+  }
+}
+
+function Tratar-Estado($ctx, [string]$nome) {
+  if ($nome -notmatch '^[A-Za-z0-9_-]{1,40}$') { Enviar-Json $ctx 400 '{"ok":false}'; return }
+  $req = $ctx.Request
+  if ($req.HttpMethod -eq 'POST') {
+    $bytes = Ler-Bytes $req
+    $v = 1
+    if ($Estados.ContainsKey($nome)) { $v = $Estados[$nome].v + 1 }
+    $tipo = [string]$req.ContentType
+    if (-not $tipo) { $tipo = 'application/octet-stream' }
+    $Estados[$nome] = @{ v = $v; bytes = $bytes; tipo = $tipo; meta = [string]$req.Headers['X-Meta'] }
+    Enviar-Json $ctx 200 ('{"ok":true,"v":' + $v + '}')
+  } else {
+    if (-not $Estados.ContainsKey($nome)) { Enviar-Vazio $ctx; return }
+    $e = $Estados[$nome]
+    if ($req.QueryString['v'] -eq [string]$e.v) { Enviar-Vazio $ctx; return }
+    $ctx.Response.Headers['X-Versao'] = [string]$e.v
+    $ctx.Response.Headers['X-Meta'] = $e.meta
+    Enviar-Bytes $ctx 200 $e.bytes $e.tipo
+  }
 }
 
 function Chamar-Holyrics($ctx) {
@@ -198,6 +259,10 @@ while ($listener.IsListening) {
         Chamar-Holyrics $ctx
       } elseif ($caminho -eq '/ponte/arquivos') {
         Listar-Arquivos $ctx
+      } elseif ($caminho.StartsWith('/ponte/caixa/')) {
+        Tratar-Caixa $ctx $caminho.Substring(13)
+      } elseif ($caminho.StartsWith('/ponte/estado/')) {
+        Tratar-Estado $ctx $caminho.Substring(14)
       } else {
         Enviar-Json $ctx 404 '{"ok":false}'
       }

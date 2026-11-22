@@ -108,6 +108,7 @@
   const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS' };
   const isTextLike = (clip) => !!clip && (clip.type === 'text' || clip.type === 'holyrics');
   const defaultHolyrics = () => ({ host: '127.0.0.1', port: 8091, token: '', arrows: true, useOrder: true, mediaDir: '' });
+  const defaultObs = () => ({ quality: 'alta' });
   const FIT_OPTS = [['cover', 'Preencher (corta bordas)'], ['contain', 'Encaixar (sem cortar)'], ['stretch', 'Esticar']];
 
   const defaultFx = () => ({ brightness: 100, contrast: 100, saturate: 100, hue: 0, blur: 0, zoom: 100 });
@@ -139,7 +140,7 @@
 
   function defaultProject() {
     const cols = 8;
-    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {}, holyrics: defaultHolyrics() };
+    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {}, holyrics: defaultHolyrics(), obs: defaultObs() };
     // camadas ficam guardadas de baixo (índice 0) para cima
     const fundo = newLayer('Fundo', cols);
     const midia = newLayer('Mídia', cols);
@@ -164,6 +165,7 @@
     for (const k of ['width', 'height', 'columns', 'master', 'masterFade']) if (typeof p[k] !== 'number') p[k] = d[k];
     p.clips = p.clips || {};
     p.holyrics = Object.assign(defaultHolyrics(), p.holyrics);
+    p.obs = Object.assign(defaultObs(), p.obs);
     p.layers = Array.isArray(p.layers) && p.layers.length ? p.layers : d.layers;
     for (const l of p.layers) {
       l.fx = Object.assign(defaultFx(), l.fx);
@@ -720,6 +722,8 @@
     }
     ctx.globalAlpha = 1;
 
+    if (rt.testPattern) drawTestPattern(ctx, W, H, now);
+
     // copia para a janela do projetor
     if (rt.outWin && !rt.outWin.closed && rt.outCtx) {
       const oc = rt.outCanvas;
@@ -743,6 +747,7 @@
     lastFrameT = now;
     try {
       renderComposition(now);
+      if (Holy.bridge) overlayCheck();
       updateProgress();
     } catch (e) { console.error(e); }
     fpsCount++;
@@ -799,6 +804,17 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     win.addEventListener('pagehide', () => { if (rt.outWin === win) { rt.outWin = null; rt.outCtx = null; updateOutStatus(); } });
     updateOutStatus();
     schedule();
+  }
+
+  function moveOutputToScreen(scr) {
+    const win = openOutput();
+    if (!win) return;
+    try {
+      win.moveTo(scr.availLeft, scr.availTop);
+      win.resizeTo(scr.availWidth, scr.availHeight);
+    } catch (_) { /* sem permissão */ }
+    win.document.documentElement.requestFullscreen({ screen: scr }).catch(() => {});
+    toast(`Projetor enviado para “${scr.label || 'tela'}”. Se não ficar em tela cheia, dê dois cliques na imagem do projetor (ou tecle F nela).`, 7000);
   }
 
   async function moveOutputToSecondScreen() {
@@ -2082,6 +2098,308 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     }
   }
 
+
+  // =====================================================================
+  // Saídas: HDMI (janela do projetor), imagem de teste e OBS (navegador)
+  // =====================================================================
+  function drawTestPattern(c, W, H, now) {
+    c.save();
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.filter = 'none';
+    c.fillStyle = '#202020'; c.fillRect(0, 0, W, H);
+    // barras de cor
+    const bars = ['#c0c0c0', '#c0c000', '#00c0c0', '#00c000', '#c000c0', '#c00000', '#0000c0'];
+    const bw = W / bars.length, by = H * 0.62, bh = H * 0.18;
+    bars.forEach((b, i) => { c.fillStyle = b; c.fillRect(i * bw, by, Math.ceil(bw), bh); });
+    // degradê de cinza
+    const g = c.createLinearGradient(0, 0, W, 0);
+    g.addColorStop(0, '#000'); g.addColorStop(1, '#fff');
+    c.fillStyle = g; c.fillRect(0, by + bh, W, H * 0.06);
+    // grade
+    c.strokeStyle = 'rgba(255,255,255,.35)'; c.lineWidth = Math.max(1, H / 540);
+    for (let i = 1; i < 16; i++) { const x = (W / 16) * i; c.beginPath(); c.moveTo(x, 0); c.lineTo(x, H); c.stroke(); }
+    for (let i = 1; i < 9; i++) { const y = (H / 9) * i; c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+    // círculo e diagonais
+    c.strokeStyle = '#fff'; c.lineWidth = Math.max(2, H / 360);
+    c.beginPath(); c.arc(W / 2, H / 2, H * 0.4, 0, Math.PI * 2); c.stroke();
+    c.beginPath(); c.moveTo(0, 0); c.lineTo(W, H); c.moveTo(W, 0); c.lineTo(0, H); c.stroke();
+    // borda (se não aparecer inteira, a TV/projetor está cortando a imagem)
+    c.strokeStyle = '#ff3b3b'; c.lineWidth = Math.max(4, H / 135);
+    c.strokeRect(c.lineWidth / 2, c.lineWidth / 2, W - c.lineWidth, H - c.lineWidth);
+    // área segura (90%)
+    c.setLineDash([H / 60, H / 90]); c.strokeStyle = '#f5a524'; c.lineWidth = Math.max(2, H / 540);
+    c.strokeRect(W * 0.05, H * 0.05, W * 0.9, H * 0.9); c.setLineDash([]);
+    // textos
+    c.fillStyle = '#fff'; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.font = `bold ${Math.round(H / 12)}px Arial, sans-serif`;
+    c.fillText(`${W} × ${H}`, W / 2, H * 0.36);
+    c.font = `${Math.round(H / 30)}px Arial, sans-serif`;
+    c.fillText('Imagem de teste — Cara de Leão Projeção', W / 2, H * 0.46);
+    c.fillText('A borda vermelha deve aparecer inteira · o círculo deve ficar redondo', W / 2, H * 0.52);
+    // ponto em movimento (mostra se a saída está travada)
+    const t = (now / 2000) % 1;
+    c.fillStyle = '#2ecc71';
+    c.beginPath(); c.arc(W * 0.1 + t * W * 0.8, H * 0.57, H / 70, 0, Math.PI * 2); c.fill();
+    c.restore();
+  }
+
+  // ---------- OBS: "programa" por WebRTC + "só letras" (PNG transparente) ----------
+  const OBS_QUALITY = {
+    alta: { label: 'Alta — resolução cheia, 30 fps', bitrate: 12e6, h: 0, fps: 30 },
+    alta60: { label: 'Alta — resolução cheia, 60 fps', bitrate: 18e6, h: 0, fps: 60 },
+    media: { label: 'Média — 720p, 30 fps', bitrate: 6e6, h: 720, fps: 30 },
+    leve: { label: 'Leve — 540p, 30 fps (computador fraco)', bitrate: 3e6, h: 540, fps: 30 },
+  };
+  const Obs = { peers: new Map(), stream: null, timer: null };
+
+  async function ponte(method, path, body, headers) {
+    const r = await fetch('ponte/' + path, { method, body, headers: Object.assign({ 'X-Ponte': '1' }, headers || {}) });
+    return r;
+  }
+
+  function obsStream() {
+    const tr = Obs.stream && Obs.stream.getVideoTracks()[0];
+    if (!tr || tr.readyState === 'ended') Obs.stream = comp.captureStream();
+    return Obs.stream;
+  }
+
+  function iceDone(pc) {
+    return new Promise((res) => {
+      if (pc.iceGatheringState === 'complete') { res(); return; }
+      const t = setTimeout(res, 1500);
+      pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } });
+    });
+  }
+
+  async function applyObsQuality(peer) {
+    const q = OBS_QUALITY[P.obs.quality] || OBS_QUALITY.alta;
+    try {
+      const params = peer.sender.getParameters();
+      if (!params.encodings || !params.encodings.length) params.encodings = [{}];
+      params.encodings[0].maxBitrate = q.bitrate;
+      params.encodings[0].maxFramerate = q.fps;
+      params.encodings[0].scaleResolutionDownBy = q.h && P.height > q.h ? P.height / q.h : 1;
+      params.degradationPreference = 'maintain-resolution';
+      await peer.sender.setParameters(params);
+    } catch (e) { console.warn('OBS: qualidade', e); }
+  }
+
+  function closePeer(id) {
+    const peer = Obs.peers.get(id);
+    if (!peer) return;
+    try { peer.pc.close(); } catch (_) { /* ok */ }
+    Obs.peers.delete(id);
+    updateObsCount();
+  }
+
+  async function obsHandle(msg) {
+    if (!msg || !msg.from) return;
+    if (msg.type === 'hello') {
+      closePeer(msg.from);
+      const pc = new RTCPeerConnection({ iceServers: [] });
+      const stream = obsStream();
+      const sender = pc.addTrack(stream.getVideoTracks()[0], stream);
+      const peer = { pc, sender };
+      Obs.peers.set(msg.from, peer);
+      pc.addEventListener('connectionstatechange', () => {
+        if (pc.connectionState === 'failed' || pc.connectionState === 'closed') closePeer(msg.from);
+        updateObsCount();
+      });
+      await pc.setLocalDescription(await pc.createOffer());
+      await iceDone(pc);
+      await ponte('POST', 'caixa/obs-' + msg.from, JSON.stringify({ type: 'offer', sdp: pc.localDescription.sdp }), { 'Content-Type': 'application/json' });
+    } else if (msg.type === 'answer') {
+      const peer = Obs.peers.get(msg.from);
+      if (!peer) return;
+      await peer.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+      applyObsQuality(peer);
+    } else if (msg.type === 'bye') closePeer(msg.from);
+  }
+
+  async function obsPoll() {
+    clearTimeout(Obs.timer);
+    try {
+      const r = await ponte('GET', 'caixa/controle');
+      const msgs = await r.json();
+      for (const m of [].concat(msgs || [])) await obsHandle(m).catch((e) => console.warn('OBS', e));
+    } catch (_) { /* ponte fechada */ }
+    Obs.timer = setTimeout(obsPoll, 600);
+  }
+
+  function obsStart() {
+    if (!Holy.bridge || !window.RTCPeerConnection) return;
+    obsPoll();
+  }
+
+  function obsConnected() {
+    let n = 0;
+    for (const p of Obs.peers.values()) if (p.pc.connectionState === 'connected') n++;
+    return n;
+  }
+  function updateObsCount() {
+    const e = $('#obsCount');
+    if (e) { const n = obsConnected(); e.textContent = n ? `● ${n} conectado${n > 1 ? 's' : ''}` : 'nenhum OBS conectado'; e.classList.toggle('on', n > 0); }
+  }
+
+  // Saída "só letras": quando a letra no ar muda, desenha só os textos num PNG transparente
+  // e entrega para a página do OBS pela ponte.
+  const Overlay = { sig: null, ids: '', busy: false, again: false, canvas: null };
+
+  function overlayState() {
+    const W = P.width, H = P.height;
+    const items = [];
+    if (!rt.blackout) {
+      for (const layer of P.layers) {
+        const L = rt.layers[layer.id];
+        const clip = L && L.current && P.clips[L.current.clipId];
+        if (!isTextLike(clip) || layer.bypass || layer.opacity <= 0) continue;
+        const text = clipText(clip);
+        if (!text) continue;
+        items.push({ layer, clip, text });
+      }
+    }
+    const sig = `${W}x${H}|` + items.map((i) => [i.clip.id, i.text, JSON.stringify(i.clip.style), i.layer.opacity, JSON.stringify(i.layer.fx)].join('\u0001')).join('\u0002');
+    return { sig, items, ids: items.map((i) => i.clip.id).join(',') };
+  }
+
+  function overlayCheck() {
+    const st = overlayState();
+    if (st.sig === Overlay.sig) return;
+    // mesma(s) letra(s) mudando de slide → transição do texto; entrou/saiu → fade da camada
+    let fade = 0.3;
+    if (Overlay.sig !== null) {
+      if (st.ids === Overlay.ids && st.items.length) fade = st.items[0].clip.style.transition || 0;
+      else {
+        const layers = new Set([...st.items.map((i) => i.layer)]);
+        for (const id of Overlay.ids.split(',').filter(Boolean)) { const l = layerOfClip(id); if (l) layers.add(l); }
+        fade = Math.max(0, ...[...layers].map((l) => l.fade || 0));
+        if (rt.blackout) fade = P.masterFade || 0.5;
+      }
+    }
+    Overlay.sig = st.sig;
+    Overlay.ids = st.ids;
+    Overlay.pending = { st, fade };
+    overlaySend();
+  }
+
+  async function overlaySend() {
+    if (Overlay.busy) { Overlay.again = true; return; }
+    Overlay.busy = true;
+    try {
+      do {
+        Overlay.again = false;
+        const { st, fade } = Overlay.pending;
+        let blob = new Blob([]);
+        if (st.items.length) {
+          const W = P.width, H = P.height;
+          const cv = Overlay.canvas || (Overlay.canvas = document.createElement('canvas'));
+          cv.width = W; cv.height = H;
+          const c = cv.getContext('2d');
+          c.clearRect(0, 0, W, H);
+          for (const it of st.items) {
+            c.filter = fxFilter(it.layer.fx);
+            drawSlide(c, it.clip, it.text, it.layer.opacity, W, H);
+          }
+          c.filter = 'none';
+          blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
+        }
+        await ponte('POST', 'estado/letras', blob, { 'Content-Type': 'image/png', 'X-Meta': JSON.stringify({ fade: +fade.toFixed(2), w: P.width, h: P.height }) });
+      } while (Overlay.again);
+    } catch (e) { console.warn('Saída de letras', e); }
+    Overlay.busy = false;
+  }
+
+  // ---------- janela "Saídas" ----------
+  async function renderOutputsDialog() {
+    const body = $('#saidasBody');
+    body.innerHTML = '';
+    const on = !!(rt.outWin && !rt.outWin.closed);
+    const base = /^https?:$/.test(location.protocol) ? location.href.replace(/[^/]*([?#].*)?$/, '') : '';
+    const urlProg = base + 'saida.html';
+    const urlLetras = base + 'saida.html?letras';
+    const copy = (txt) => h('button', {
+      class: 'btn small', onclick: async (e) => {
+        try { await navigator.clipboard.writeText(txt); e.target.textContent = '✔ Copiado'; } catch (_) { prompt('Copie o endereço:', txt); }
+      },
+    }, '📋 Copiar');
+
+    // HDMI
+    const screens = h('div', { class: 'screens' });
+    const hdmi = h('section', { class: 'out-sec' },
+      h('h3', {}, '🖥 Saída HDMI (projetor / TV)'),
+      h('div', { class: 'out-row' },
+        h('span', { class: 'status ' + (on ? 'on' : 'off') }, on ? '● Janela do projetor aberta' : 'Janela do projetor fechada'),
+        h('button', { class: 'btn primary small', onclick: () => { openOutput(); setTimeout(renderOutputsDialog, 300); } }, on ? 'Mostrar janela do projetor' : 'Abrir janela do projetor'),
+        h('button', { class: 'btn small', onclick: () => detectScreens(screens) }, '🔍 Detectar telas')),
+      screens,
+      h('div', { class: 'hint' },
+        'Ligue o cabo HDMI e deixe o Windows em “Estender” (tecla Win+P). Abra a janela do projetor, envie para a tela do projetor ',
+        'e dê dois cliques nela (ou tecle F) para tela cheia. Coloque a resolução do programa igual à da tela.'),
+      checkF('Mostrar imagem de teste em todas as saídas (para ajustar o projetor)', rt, 'testPattern'));
+
+    // OBS
+    const q = h('select', { onchange: () => { P.obs.quality = q.value; scheduleSave(); for (const p of Obs.peers.values()) applyObsQuality(p); } },
+      Object.entries(OBS_QUALITY).map(([k, v]) => h('option', { value: k }, v.label)));
+    q.value = P.obs.quality;
+    const obs = h('section', { class: 'out-sec' }, h('h3', {}, '📡 Saída pelo navegador (OBS)'));
+    if (!Holy.bridge) {
+      obs.append(h('div', { class: 'warn' },
+        'Para a saída do OBS, abra o programa pelo “Iniciar-Windows.bat” (ponte local). ',
+        'Agora ele está aberto direto do arquivo, e o OBS não consegue se conectar.'),
+      h('div', { class: 'hint' }, 'Sem a ponte, ainda dá para usar no OBS a fonte “Captura de janela” apontando para a janela “Projetor — Cara de Leão”.'));
+    } else {
+      obs.append(
+        h('h4', {}, 'Programa completo (o mesmo que vai para o projetor)'),
+        h('div', { class: 'out-row' }, h('code', {}, urlProg), copy(urlProg), h('span', { class: 'status', id: 'obsCount' })),
+        h('label', { class: 'f' }, h('span', { class: 'fl' }, 'Qualidade'), q, h('span')),
+        h('h4', {}, 'Só as letras, com fundo transparente (para colocar por cima da câmera no OBS)'),
+        h('div', { class: 'out-row' }, h('code', {}, urlLetras), copy(urlLetras)),
+        h('div', { class: 'hint' },
+          h('b', {}, 'No OBS: '), `Fontes → + → Navegador → cole o endereço → Largura ${P.width} e Altura ${P.height}. `,
+          'Para o programa completo, marque também “Atualizar navegador quando a cena se tornar ativa” se quiser. ',
+          'O OBS precisa estar neste mesmo computador e esta janela de controle precisa ficar aberta.'),
+        h('div', { class: 'hint' }, 'Também funciona no navegador comum (para conferir) e com a fonte “Captura de janela” do OBS.'));
+      setTimeout(updateObsCount, 0);
+    }
+    body.append(hdmi, obs);
+  }
+
+  async function detectScreens(box) {
+    box.innerHTML = '';
+    if (!('getScreenDetails' in window)) {
+      box.append(h('div', { class: 'hint' }, 'Este navegador não lista as telas. Use o Chrome ou o Edge, ou arraste a janela do projetor manualmente.'));
+      return;
+    }
+    let sd;
+    try { sd = await window.getScreenDetails(); } catch (_) {
+      box.append(h('div', { class: 'warn' }, 'Permissão negada. Clique no cadeado da barra de endereço e permita “Gerenciamento de janelas”.'));
+      return;
+    }
+    for (const scr of sd.screens) {
+      const pw = Math.round(scr.width * (scr.devicePixelRatio || 1)), ph = Math.round(scr.height * (scr.devicePixelRatio || 1));
+      box.append(h('div', { class: 'screen-item' },
+        h('div', {}, h('b', {}, scr.label || 'Tela'), h('span', { class: 'muted' }, ` · ${pw}×${ph}${scr.isPrimary ? ' · principal (esta)' : ''}${scr === sd.currentScreen ? ' · painel de controle' : ''}`)),
+        h('div', { class: 'btn-row', style: 'margin:0' },
+          h('button', { class: 'btn small', onclick: () => moveOutputToScreen(scr) }, 'Enviar projetor para esta tela'),
+          h('button', {
+            class: 'btn small', onclick: () => {
+              P.width = pw; P.height = ph; layoutCache.clear(); setupTopbar(); scheduleSave();
+              toast(`Resolução do programa: ${pw}×${ph}`);
+            },
+          }, 'Usar esta resolução'))));
+    }
+  }
+
+  // ao recarregar/fechar o painel, avisa os OBS conectados para reconectarem na hora
+  window.addEventListener('pagehide', () => {
+    for (const id of Obs.peers.keys()) {
+      fetch('ponte/caixa/obs-' + id, { method: 'POST', keepalive: true, headers: { 'X-Ponte': '1', 'Content-Type': 'application/json' }, body: '{"type":"reset"}' }).catch(() => {});
+    }
+  });
+
+  $('#btnSaidas').addEventListener('click', () => { renderOutputsDialog(); $('#saidasDlg').showModal(); });
+  $('#saidasDlg').addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target === e.currentTarget) $('#saidasDlg').close(); });
+  $('#saidasDlg').addEventListener('change', (e) => { if (e.target.type === 'checkbox') $('#btnSaidas').classList.toggle('active', !!rt.testPattern); });
+
   // =====================================================================
   // Inicialização
   // =====================================================================
@@ -2098,8 +2416,9 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     if (!saved) saveNow();
     await detectBridge();
     holyPoll();
+    obsStart();
     // expõe para depuração no console
-    window.CDL = { get project() { return P; }, rt, Holy, triggerColumn, clearAll };
+    window.CDL = { get project() { return P; }, rt, Holy, Obs, triggerColumn, clearAll };
   }
   init();
 })();

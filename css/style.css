@@ -285,3 +285,20 @@ dialog.wide { max-width: 900px; }
 .file-tile.busy { opacity: .5; }
 .file-tile.done { border-color: var(--ok); }
 .popover hr + button { margin-top: 0; }
+
+/* ---------- Saídas ---------- */
+.out-sec { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; }
+.out-sec h3 { margin: 2px 0 8px; color: var(--accent); font-size: 14px; }
+.out-sec h4 { margin: 12px 0 4px; font-size: 12px; color: var(--text); }
+.out-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
+.out-row code { background: #0f1115; border: 1px solid var(--line); border-radius: 5px; padding: 5px 8px; user-select: all; font-size: 12px; }
+.screen-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.warn { background: rgba(255, 59, 59, .1); border: 1px solid #6b2a2a; color: #ffc9c9; border-radius: 6px; padding: 8px 10px; margin: 6px 0; font-size: 12px; }
+
+/* barra de cima mais compacta */
+#selRes { max-width: 170px; }
+.master input { width: 100px; }
+.topbar { gap: 8px; }
+@media (max-width: 1600px) {
+  .field.res-label .lbl, #outStatus { display: none; }
+}

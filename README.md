@@ -82,12 +82,35 @@ A integração usa o **API Server** do Holyrics.
 
 **1. No Holyrics:** menu **Arquivo → Configurações → API Server**
 - ative o servidor e anote a **porta**;
-- em **gerenciar permissões**, crie um **token** e libere pelo menos: `GetCurrentPresentation`, `ActionNext`,
+- em **gerenciar permissões**, crie um **token** e libere pelo menos: `GetCurrentPresentation`,
+  `GetCurrentBackground`, `GetThumbnail`, `ActionNext`,
   `ActionPrevious`, `ActionGoToIndex`, `GetCurrentSchedule`, `GetLyricsPlaylist`, `SearchLyrics`, `GetLyrics`
   (e `GetTokenInfo` para o botão de teste).
 
 **2. Aqui:** botão **Holyrics** na barra de cima → IP (use `127.0.0.1` se o Holyrics está no mesmo computador),
 porta e token → **Testar conexão**. A bolinha do botão fica verde quando está conectado.
+
+### Holyrics em camadas (fundo + letra separados)
+
+Clique num `+` → **🎶 Holyrics em camadas** (ou o botão na janela Holyrics). O programa cria, na mesma coluna:
+
+- na camada **Fundo**: o clipe **Fundo do Holyrics ao vivo**, com o vídeo/imagem/tema que está no ar no Holyrics,
+  trocando junto com ele (com transição);
+- na camada **Letras**: o clipe **Holyrics ao vivo (letra)**, só o texto, com o visual definido aqui.
+
+Aperte o número da coluna e pronto: o Holyrics comanda tudo, e como letra e fundo ficam em camadas separadas, dá
+para pôr câmera ou logo entre eles, desfocar só o fundo, mandar só a letra para o OBS etc.
+Tela preta no Holyrics deixa o fundo preto e tira a letra.
+
+**Qualidade do fundo:** a API do Holyrics informa *qual* fundo está no ar, mas não envia o arquivo. O programa
+procura o mesmo arquivo na **pasta de mídia do Holyrics** (pela ponte) e usa o original, em qualidade total.
+Se o Holyrics estiver em **outro computador**, compartilhe a pasta de mídia dele na rede e informe o caminho
+(ex.: `\\PC-HOLYRICS\Holyrics`) no clipe de fundo. Sem o arquivo (ou em temas), usa a miniatura enviada
+pelo Holyrics, em resolução menor (o painel avisa quando isso acontece).
+
+> Por que não usar direto as URLs que o Holyrics gera para o OBS? Elas são páginas web, e o navegador não deixa um
+> programa capturar a imagem de uma página de outro endereço para misturar com as camadas. A API, com o mesmo
+> IP, entrega o texto e o fundo separados, que é exatamente o que precisamos.
 
 **O que dá para fazer:**
 

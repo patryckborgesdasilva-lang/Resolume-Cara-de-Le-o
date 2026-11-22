@@ -104,8 +104,8 @@
     [1024, 768, 'Projetor 4:3'], [1400, 1050, 'Projetor 4:3 (SXGA+)'], [1280, 800, 'Projetor 16:10'],
     [1920, 1200, '16:10 (WUXGA)'], [1080, 1920, 'Vertical 9:16'],
   ];
-  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera / NDI', screen: 'Captura de tela', holyrics: 'Holyrics ao vivo', obs: 'Cena / fonte do OBS' };
-  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS', obs: 'OBS' };
+  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera / NDI', screen: 'Captura de tela', holyrics: 'Holyrics ao vivo (letra)', obs: 'Cena / fonte do OBS', holybg: 'Holyrics ao vivo (fundo)' };
+  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS', obs: 'OBS', holybg: 'FUNDO HOLYRICS' };
   const isTextLike = (clip) => !!clip && (clip.type === 'text' || clip.type === 'holyrics');
   const defaultHolyrics = () => ({ host: '127.0.0.1', port: 8091, token: '', arrows: true, useOrder: true, mediaDir: '' });
   const defaultObs = () => ({ quality: 'alta' });
@@ -182,6 +182,7 @@
       if (c.type === 'text') { c.style = Object.assign(defaultTextStyle(), c.style); c.slide = c.slide || 0; c.text = c.text || ''; }
       if (c.type === 'holyrics') c.style = Object.assign(defaultTextStyle(), c.style);
       if (c.type === 'obs') { c.fps = +c.fps || 10; c.res = c.res || 'media'; }
+      if (c.type === 'holybg') { c.fit = c.fit || 'cover'; if (typeof c.transition !== 'number') c.transition = 0.8; }
       if (c.type === 'video') { c.speed = c.speed || 1; c.volume = c.volume == null ? 1 : c.volume; c.loop = c.loop !== false; }
       if (!c.fit && !isTextLike(c) && c.type !== 'color') c.fit = 'cover';
     }
@@ -593,6 +594,7 @@
   // =====================================================================
   function isOpaque(clip) {
     if (!clip) return false;
+    if (clip.type === 'holybg') return !!HolyBg.cur;
     if (clip.type === 'color') return true;
     if (isTextLike(clip)) return false;
     if (clip.fit === 'contain') return false;
@@ -638,6 +640,8 @@
       case 'holyrics':
         drawTextClip(c, clip, alpha, now, W, H);
         return true;
+      case 'holybg':
+        return drawHolyBg(c, clip, alpha, now, W, H);
       default: {
         if (!m || !m.el || !m.ready) return false;
         const el = m.el;
@@ -887,6 +891,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     else if (clip.type === 'holyrics') thumb = `<div class="tthumb holy">${esc(Holy.text || (Holy.status === 'ok' ? '(nada no ar no Holyrics)' : 'Holyrics desconectado'))}</div>`;
     else if (clip.type === 'color') thumb = `<div class="cthumb" style="background:${esc(colorCss(clip))}"></div>`;
     else if (clip.type === 'camera') thumb = `<div class="ithumb">${clip.obsVirtual ? '🎥' : '📷'}</div>`;
+    else if (clip.type === 'holybg') thumb = HolyBg.thumb ? `<img src="${HolyBg.thumb}" draggable="false" alt="">` : `<div class="ithumb">🎞</div>`;
     else if (clip.type === 'obs') thumb = clip.thumb ? `<img src="${clip.thumb}" draggable="false" alt="">` : `<div class="ithumb">📺</div>`;
     else if (clip.type === 'screen') thumb = `<div class="ithumb">🖥</div>`;
     else if (clip.thumb) thumb = `<img src="${clip.thumb}" draggable="false" alt="">`;
@@ -1248,6 +1253,12 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
         return;
       }
       case 'holyimport': openHolyDialog('musicas', layer.id); return;
+      case 'holybg':
+        placeClip(layer, col, newHolyBgClip());
+        holyPoll(); holyBgPoll();
+        if (!P.holyrics.token) openHolyDialog();
+        return;
+      case 'holysplit': setupHolyLayers(); return;
     }
   });
   $('#fileInput').addEventListener('change', (e) => {
@@ -1432,6 +1443,9 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
         break;
       case 'obs':
         obsClipControls(sec, clip);
+        break;
+      case 'holybg':
+        holyBgControls(sec, clip);
         break;
       case 'camera': {
         const sel = h('select', {
@@ -1727,7 +1741,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   async function holyPoll() {
     clearTimeout(Holy.timer);
     if (holyBusy) return;
-    if (!P.holyrics.token || !holyClips().length) {
+    if (!P.holyrics.token || !Object.values(P.clips).some((c) => c.type === 'holyrics' || c.type === 'holybg')) {
       if (Holy.status !== 'off') { Holy.status = 'off'; holyChanged(); }
       Holy.timer = setTimeout(holyPoll, 1500);
       return;
@@ -1897,12 +1911,14 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
       testOut,
       h('div', { class: 'hint' },
         'No Holyrics: menu Arquivo → Configurações → API Server. Ative o servidor, anote a porta e crie um token em “gerenciar permissões” ',
-        '(libere pelo menos: GetCurrentPresentation, ActionNext, ActionPrevious, ActionGoToIndex, GetCurrentSchedule, GetLyricsPlaylist, SearchLyrics, GetLyrics). ',
+        '(libere pelo menos: GetCurrentPresentation, GetCurrentBackground, GetThumbnail, ActionNext, ActionPrevious, ActionGoToIndex, GetCurrentSchedule, GetLyricsPlaylist, SearchLyrics, GetLyrics). ',
         'Se o Holyrics estiver neste mesmo computador, use o IP 127.0.0.1.'),
       h('div', { class: 'hint' }, Holy.bridge
         ? `✔ Ponte local ativa (${Holy.bridgeKind}). A conexão com o Holyrics passa por ela.`
         : '⚠ Ponte local desligada. O navegador pode bloquear a conexão direta com o Holyrics. Para garantir, abra o programa pelo arquivo “Iniciar-Windows.bat”.'));
 
+    conn.append(h('div', { class: 'btn-row' },
+      h('button', { class: 'btn small primary', onclick: () => { $('#holyDlg').close(); setupHolyLayers(); } }, '🎶 Montar Holyrics em camadas (fundo + letra)')));
     const tabs = h('div', { class: 'tabs' },
       [['musicas', '🎵 Músicas do culto'], ['buscar', '🔎 Buscar música'], ['fundos', '🖼 Fundos (pasta de mídia)']].map(([id, label]) =>
         h('button', { class: 'tab' + (holyUi.tab === id ? ' active' : ''), onclick: () => { holyUi.tab = id; holyUi.layerId = defaultLayerFor(id); renderHolyDialog(); } }, label)));
@@ -2078,6 +2094,225 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
 
   $('#btnHoly').addEventListener('click', () => openHolyDialog());
   $('#holyDlg').addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target === e.currentTarget) $('#holyDlg').close(); });
+
+
+  // =====================================================================
+  // Fundo do Holyrics ao vivo: segue o fundo que está no ar no Holyrics.
+  //   Vídeos/imagens: arquivo original da pasta de mídia (pela ponte), qualidade total.
+  //   Sem arquivo (tema, outro computador sem pasta compartilhada): miniatura enviada pelo Holyrics.
+  // =====================================================================
+  const HolyBg = { key: '', info: null, cur: null, prev: null, t0: 0, cache: new Map(), files: null, filesAt: 0, thumb: null, timer: null, busy: false };
+
+  function newHolyBgClip() {
+    return { id: uid(), type: 'holybg', name: 'Fundo do Holyrics', fit: 'cover', transition: 0.8 };
+  }
+
+  const holyBgClips = () => Object.values(P.clips).filter((c) => c.type === 'holybg');
+  const stripExt = (n) => String(n || '').replace(/^.*[\\/]/, '').replace(/\.[a-z0-9]{2,5}$/i, '').trim().toLowerCase();
+
+  async function holyMediaFiles(force) {
+    if (!Holy.bridge) return [];
+    if (HolyBg.files && !force && Date.now() - HolyBg.filesAt < 60000) return HolyBg.files;
+    if (force && HolyBg.files && Date.now() - HolyBg.filesAt < 5000) return HolyBg.files;
+    try {
+      const r = await fetch('ponte/arquivos?dir=' + encodeURIComponent(P.holyrics.mediaDir || ''), { headers: { 'X-Ponte': '1' } });
+      const j = await r.json();
+      if (j.ok) {
+        HolyBg.files = [].concat(j.files || []);
+        if (!P.holyrics.mediaDir && j.dir) { P.holyrics.mediaDir = j.dir; scheduleSave(); }
+      } else HolyBg.files = [];
+    } catch (_) { HolyBg.files = []; }
+    HolyBg.filesAt = Date.now();
+    return HolyBg.files;
+  }
+
+  async function holyFindFile(bg) {
+    const want = [bg.name, bg.id].filter(Boolean).map(stripExt).filter(Boolean);
+    if (!want.length) return null;
+    const kind = /image/.test(bg.type) ? 'image' : /video/.test(bg.type) ? 'video' : null;
+    const match = (files) => files.find((f) => (!kind || f.kind === kind) && want.includes(stripExt(f.name)));
+    return match(await holyMediaFiles(false)) || match(await holyMediaFiles(true)) || null;
+  }
+
+  function loadBgElement(src, kind) {
+    return new Promise((res, rej) => {
+      const to = setTimeout(() => rej(new Error('tempo esgotado')), 15000);
+      if (kind === 'video') {
+        const v = document.createElement('video');
+        v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
+        v.addEventListener('loadeddata', () => { clearTimeout(to); res(v); }, { once: true });
+        v.addEventListener('error', () => { clearTimeout(to); rej(new Error('vídeo não suportado')); }, { once: true });
+        v.src = src;
+      } else {
+        const img = new Image();
+        img.onload = () => { clearTimeout(to); res(img); };
+        img.onerror = () => { clearTimeout(to); rej(new Error('imagem inválida')); };
+        img.src = src;
+      }
+    });
+  }
+
+  async function holyBgEntry(bg) {
+    const k = bg.type + ':' + bg.id;
+    if (HolyBg.cache.has(k)) { const e = HolyBg.cache.get(k); HolyBg.cache.delete(k); HolyBg.cache.set(k, e); return e; }
+    let e = null;
+    if (bg.type !== 'theme') {
+      try {
+        const f = await holyFindFile(bg);
+        if (f) {
+          const blob = await (await fetch('ponte/arquivo?path=' + encodeURIComponent(f.path))).blob();
+          const url = URL.createObjectURL(blob);
+          try { e = { el: await loadBgElement(url, f.kind), url, source: 'arquivo', file: f.name }; } catch (err) { URL.revokeObjectURL(url); }
+        }
+      } catch (_) { /* tenta a miniatura */ }
+    }
+    let thumb = null;
+    const types = bg.type === 'theme' ? ['theme', 'background'] : /video/.test(bg.type) ? ['background', 'video'] : ['background', 'image'];
+    for (const t of types) {
+      try {
+        const r = await Holy.call('GetThumbnail', { id: bg.id, type: t });
+        const item = [].concat(r || []).find((x) => x && x.image);
+        if (item) { thumb = String(item.image).startsWith('data:') ? item.image : 'data:image/jpeg;base64,' + item.image; break; }
+      } catch (_) { /* próximo tipo */ }
+    }
+    if (!e && thumb) { try { e = { el: await loadBgElement(thumb, 'image'), source: 'miniatura' }; } catch (_) { /* nada */ } }
+    if (!e) return null;
+    e.thumb = thumb;
+    e.name = bg.name || bg.id;
+    e.type = bg.type;
+    HolyBg.cache.set(k, e);
+    // limita o cache (vídeos ocupam memória)
+    for (const [ck, ce] of HolyBg.cache) {
+      if (HolyBg.cache.size <= 8) break;
+      if (ce === HolyBg.cur || ce === HolyBg.prev || ce === e) continue;
+      try { if (ce.el.tagName === 'VIDEO') { ce.el.pause(); ce.el.removeAttribute('src'); ce.el.load(); } } catch (_) { /* ok */ }
+      if (ce.url) URL.revokeObjectURL(ce.url);
+      HolyBg.cache.delete(ck);
+    }
+    return e;
+  }
+
+  function holyBgSetPlaying() {
+    const live = holyBgClips().some((c) => isLive(c.id));
+    for (const e of [HolyBg.cur, HolyBg.prev]) {
+      if (!e || !e.el || e.el.tagName !== 'VIDEO') continue;
+      if (live && e.el.paused) e.el.play().catch(() => {});
+      else if (!live && !e.el.paused) e.el.pause();
+    }
+  }
+
+  async function holyBgPoll() {
+    clearTimeout(HolyBg.timer);
+    const clips = holyBgClips();
+    if (!clips.length || !P.holyrics.token || Holy.status !== 'ok') { HolyBg.timer = setTimeout(holyBgPoll, 1200); return; }
+    try {
+      const pres = Holy.pres;
+      let target = null;
+      if (pres && pres.slide_type === 'black') target = { key: 'black' };
+      else {
+        const bg = await Holy.call('GetCurrentBackground');
+        if (bg && bg.id) target = { key: `${bg.type}:${bg.id}`, bg };
+      }
+      const key = target ? target.key : '';
+      if (key !== HolyBg.key) {
+        HolyBg.key = key;
+        HolyBg.info = target && target.bg ? target.bg : null;
+        let entry = null;
+        if (target && target.key === 'black') entry = { black: true, name: 'tela preta' };
+        else if (target) entry = await holyBgEntry(target.bg);
+        if (HolyBg.key === key) holyBgSwitch(entry);
+      }
+      holyBgSetPlaying();
+    } catch (_) { /* tenta de novo no próximo ciclo */ }
+    HolyBg.timer = setTimeout(holyBgPoll, 700);
+  }
+
+  function holyBgSwitch(entry) {
+    if (entry === HolyBg.cur) return;
+    const old = HolyBg.prev;
+    HolyBg.prev = HolyBg.cur;
+    HolyBg.cur = entry;
+    HolyBg.t0 = performance.now();
+    if (old && old !== entry && old.el && old.el.tagName === 'VIDEO') old.el.pause();
+    if (entry && entry.el && entry.el.tagName === 'VIDEO') { try { entry.el.currentTime = 0; } catch (_) { /* ok */ } }
+    HolyBg.thumb = entry ? (entry.thumb || (entry.el && entry.el.tagName === 'IMG' ? entry.el.src : null)) : null;
+    holyBgClips().forEach(refreshCell);
+    const st = $('#holyBgStatus');
+    if (st) st.textContent = holyBgStatusText();
+  }
+
+  function holyBgStatusText() {
+    if (!P.holyrics.token) return 'Holyrics não configurado — clique em “Holyrics” na barra de cima.';
+    if (Holy.status === 'error') return '⚠ ' + Holy.error;
+    const e = HolyBg.cur;
+    if (!e) return HolyBg.key ? '⚠ Não consegui carregar o fundo atual do Holyrics.' : '✔ Conectado · sem fundo no ar no Holyrics';
+    if (e.black) return '✔ Holyrics em tela preta';
+    if (e.source === 'arquivo') return `✔ Fundo: ${e.name} (arquivo original: ${e.file})`;
+    return `✔ Fundo: ${e.name} — ⚠ em baixa resolução (miniatura). ` + (Holy.bridge
+      ? 'Não achei o arquivo na pasta de mídia; confira a pasta abaixo.'
+      : 'Abra o programa pelo Iniciar-Windows.bat para usar o arquivo original.');
+  }
+
+  function drawHolyBgEntry(c, e, alpha, fit, W, H) {
+    if (!e || alpha <= 0.001) return false;
+    c.globalAlpha = alpha;
+    if (e.black) { c.fillStyle = '#000'; c.fillRect(0, 0, W, H); return true; }
+    const el = e.el;
+    if (el.tagName === 'VIDEO' && el.readyState < 2) return false;
+    const sw = el.videoWidth || el.naturalWidth, sh = el.videoHeight || el.naturalHeight;
+    if (!sw || !sh) return false;
+    drawFit(c, el, sw, sh, fit, W, H);
+    return true;
+  }
+
+  function drawHolyBg(c, clip, alpha, now, W, H) {
+    const d = Math.max(0, clip.transition || 0) * 1000;
+    const p = d > 0 ? Math.min(1, (now - HolyBg.t0) / d) : 1;
+    if (p >= 1 && HolyBg.prev) {
+      const old = HolyBg.prev; HolyBg.prev = null;
+      if (old !== HolyBg.cur && old.el && old.el.tagName === 'VIDEO') old.el.pause();
+    }
+    let drew = false;
+    if (HolyBg.prev) drew = drawHolyBgEntry(c, HolyBg.prev, HolyBg.cur ? alpha : alpha * (1 - p), clip.fit, W, H);
+    drew = drawHolyBgEntry(c, HolyBg.cur, alpha * p, clip.fit, W, H) || drew;
+    return drew;
+  }
+
+  function holyBgControls(sec, clip) {
+    sec.append(h('div', { class: 'holy-status', id: 'holyBgStatus' }, holyBgStatusText()));
+    sec.append(h('div', { class: 'hint' }, 'Mostra o fundo que está no ar no Holyrics (vídeo, imagem ou tema) e troca junto com ele. Combine com o clipe “Holyrics ao vivo (letra)” em outra camada.'));
+    sec.append(selectF('Ajuste', clip, 'fit', FIT_OPTS));
+    sec.append(rangeF('Transição', clip, 'transition', 0, 3, 0.1, null, (v) => v.toFixed(1) + 's'));
+    const dir = h('input', { type: 'text', value: P.holyrics.mediaDir, placeholder: 'vazio = tentar encontrar sozinho', oninput: () => { P.holyrics.mediaDir = dir.value.trim(); HolyBg.files = null; HolyBg.cache.clear(); HolyBg.key = ''; scheduleSave(); } });
+    sec.append(field('Pasta de mídia', dir));
+    sec.append(h('div', { class: 'hint' },
+      'Para o fundo vir em qualidade total, o programa procura o mesmo arquivo na pasta de mídia do Holyrics (precisa do Iniciar-Windows.bat). ',
+      'Se o Holyrics estiver em OUTRO computador, compartilhe a pasta de mídia dele na rede e cole aqui o caminho (ex.: \\\\PC-HOLYRICS\\Holyrics). ',
+      'Sem o arquivo, o programa usa a miniatura que o Holyrics envia (baixa resolução).'));
+    sec.append(h('div', { class: 'btn-row' },
+      h('button', { class: 'btn small', onclick: () => { HolyBg.files = null; HolyBg.cache.clear(); HolyBg.key = ''; holyBgPoll(); } }, '↻ Recarregar fundo'),
+      h('button', { class: 'btn small', onclick: () => openHolyDialog() }, '⚙ Conexão com o Holyrics')));
+  }
+
+  // Cria, na mesma coluna, o fundo do Holyrics na camada de fundo e a letra na camada de letras
+  function setupHolyLayers() {
+    let fundo = P.layers.find((l) => /fundo/i.test(l.name)) || P.layers[0];
+    let letras = P.layers.slice().reverse().find((l) => /letra/i.test(l.name)) || P.layers[P.layers.length - 1];
+    if (fundo === letras) { addLayer(); letras = P.layers[P.layers.length - 1]; letras.name = 'Letras'; }
+    let col = 0;
+    while (col < P.columns && (fundo.clips[col] || letras.clips[col])) col++;
+    if (col >= P.columns) addColumns(1);
+    const bg = newHolyBgClip();
+    const txt = { id: uid(), type: 'holyrics', name: 'Holyrics ao vivo (letra)', style: defaultTextStyle() };
+    const ref = letras.clips.map((id) => P.clips[id]).find((c) => c && c.type === 'text');
+    if (ref) txt.style = JSON.parse(JSON.stringify(ref.style));
+    P.clips[bg.id] = bg; fundo.clips[col] = bg.id;
+    P.clips[txt.id] = txt; letras.clips[col] = txt.id;
+    renderDeck(); select(txt.id, letras.id); scheduleSave();
+    holyPoll(); holyBgPoll();
+    toast(`Pronto: coluna ${col + 1} tem o fundo (camada ${fundo.name}) e a letra (camada ${letras.name}) do Holyrics. Aperte ${col < 9 ? 'a tecla ' + (col + 1) : '▶ ' + (col + 1)} para colocar no ar.`, 8000);
+    if (!P.holyrics.token) openHolyDialog();
+  }
 
   // =====================================================================
   // NDI (via NDI Webcam Input do NDI Tools)
@@ -2799,10 +3034,11 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     if (!saved) saveNow();
     await detectBridge();
     holyPoll();
+    holyBgPoll();
     obsStart();
     if (P.obsWs.enabled) obsWsConnect();
     // expõe para depuração no console
-    window.CDL = { get project() { return P; }, rt, Holy, Obs, ObsWs, triggerColumn, clearAll };
+    window.CDL = { get project() { return P; }, rt, Holy, HolyBg, Obs, ObsWs, triggerColumn, clearAll };
   }
   init();
 })();

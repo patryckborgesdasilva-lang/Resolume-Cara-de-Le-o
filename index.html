@@ -13,6 +13,7 @@
     <button id="btnOutput" class="btn primary" title="Abre a janela que vai para o projetor">📽 Abrir projetor</button>
     <span id="outStatus" class="status off">Projetor fechado</span>
     <button id="btnSaidas" class="btn" title="Saída HDMI, imagem de teste e saída para o OBS">🖥 Saídas</button>
+    <button id="btnObs" class="btn holy-btn" data-state="off" title="Conexão com o OBS: cenas, fontes e câmera virtual"><span class="hdot"></span> OBS</button>
     <button id="btnHoly" class="btn holy-btn" data-state="off" title="Conexão com o Holyrics: letras ao vivo, importar músicas e fundos"><span class="hdot"></span> Holyrics</button>
 
     <label class="field res-label"><span class="lbl">Resolução</span>
@@ -54,6 +55,8 @@
     <button data-add="color">🎨 Cor ou degradê</button>
     <button data-add="camera">📷 Câmera / placa de captura</button>
     <button data-add="ndi">📡 Câmera NDI (rede)</button>
+    <button data-add="obsvcam">🎥 OBS — câmera virtual (vídeo ao vivo)</button>
+    <button data-add="obssource">📺 Cena ou fonte do OBS…</button>
     <button data-add="screen">🖥 Janela ou tela do computador</button>
     <hr>
     <button data-add="holyrics">🎶 Holyrics ao vivo (segue o slide do Holyrics)</button>
@@ -98,6 +101,12 @@
       <li>Aqui: clique num <b>+</b> → <b>Câmera NDI</b>. O programa escolhe a fonte NDI sozinho (ou troque em “Dispositivo”).</li>
       <li>O Holyrics também tem saída NDI: dá para trazer a tela inteira dele (com os fundos) do mesmo jeito.</li>
     </ul>
+    <h3>OBS (entrada)</h3>
+    <ul>
+      <li>No OBS: <b>Ferramentas → Configurações do servidor WebSocket</b> → ative. Aqui: botão <b>OBS</b> → senha → Conectar.</li>
+      <li><b>Câmera do OBS ao vivo</b>: <b>+</b> → <i>OBS — câmera virtual</i>. No OBS 30+, na engrenagem da câmera virtual escolha “Fonte” → placa de captura.</li>
+      <li><b>Qualquer cena/fonte do OBS</b>: <b>+</b> → <i>Cena ou fonte do OBS</i> (por imagens, até 15 por segundo).</li>
+    </ul>
     <h3>Saídas</h3>
     <ul>
       <li><b>HDMI</b>: botão <b>Saídas</b> → abrir a janela do projetor → enviar para a tela do projetor → dois cliques para tela cheia.</li>
@@ -117,6 +126,11 @@
   <dialog id="holyDlg" class="wide">
     <div class="dlg-title"><h2>🎶 Holyrics</h2><button class="btn small" data-close>Fechar</button></div>
     <div id="holyBody"></div>
+  </dialog>
+
+  <dialog id="obsDlg" class="wide">
+    <div class="dlg-title"><h2>🎬 OBS Studio</h2><button class="btn small" data-close>Fechar</button></div>
+    <div id="obsBody"></div>
   </dialog>
 
   <dialog id="saidasDlg" class="wide">

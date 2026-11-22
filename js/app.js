@@ -104,11 +104,12 @@
     [1024, 768, 'Projetor 4:3'], [1400, 1050, 'Projetor 4:3 (SXGA+)'], [1280, 800, 'Projetor 16:10'],
     [1920, 1200, '16:10 (WUXGA)'], [1080, 1920, 'Vertical 9:16'],
   ];
-  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera / NDI', screen: 'Captura de tela', holyrics: 'Holyrics ao vivo' };
-  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS' };
+  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera / NDI', screen: 'Captura de tela', holyrics: 'Holyrics ao vivo', obs: 'Cena / fonte do OBS' };
+  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS', obs: 'OBS' };
   const isTextLike = (clip) => !!clip && (clip.type === 'text' || clip.type === 'holyrics');
   const defaultHolyrics = () => ({ host: '127.0.0.1', port: 8091, token: '', arrows: true, useOrder: true, mediaDir: '' });
   const defaultObs = () => ({ quality: 'alta' });
+  const defaultObsWs = () => ({ host: '127.0.0.1', port: 4455, password: '', enabled: false });
   const FIT_OPTS = [['cover', 'Preencher (corta bordas)'], ['contain', 'Encaixar (sem cortar)'], ['stretch', 'Esticar']];
 
   const defaultFx = () => ({ brightness: 100, contrast: 100, saturate: 100, hue: 0, blur: 0, zoom: 100 });
@@ -140,7 +141,7 @@
 
   function defaultProject() {
     const cols = 8;
-    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {}, holyrics: defaultHolyrics(), obs: defaultObs() };
+    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {}, holyrics: defaultHolyrics(), obs: defaultObs(), obsWs: defaultObsWs() };
     // camadas ficam guardadas de baixo (índice 0) para cima
     const fundo = newLayer('Fundo', cols);
     const midia = newLayer('Mídia', cols);
@@ -166,6 +167,7 @@
     p.clips = p.clips || {};
     p.holyrics = Object.assign(defaultHolyrics(), p.holyrics);
     p.obs = Object.assign(defaultObs(), p.obs);
+    p.obsWs = Object.assign(defaultObsWs(), p.obsWs);
     p.layers = Array.isArray(p.layers) && p.layers.length ? p.layers : d.layers;
     for (const l of p.layers) {
       l.fx = Object.assign(defaultFx(), l.fx);
@@ -179,6 +181,7 @@
     for (const c of Object.values(p.clips)) {
       if (c.type === 'text') { c.style = Object.assign(defaultTextStyle(), c.style); c.slide = c.slide || 0; c.text = c.text || ''; }
       if (c.type === 'holyrics') c.style = Object.assign(defaultTextStyle(), c.style);
+      if (c.type === 'obs') { c.fps = +c.fps || 10; c.res = c.res || 'media'; }
       if (c.type === 'video') { c.speed = c.speed || 1; c.volume = c.volume == null ? 1 : c.volume; c.loop = c.loop !== false; }
       if (!c.fit && !isTextLike(c) && c.type !== 'color') c.fit = 'cover';
     }
@@ -306,6 +309,7 @@
     try {
       let stream;
       if (clip.type === 'camera') {
+        if (clip.obsVirtual) await prepareObsVirtualCam(clip);
         const video = { width: { ideal: 1920 }, height: { ideal: 1080 } };
         if (clip.deviceId) video.deviceId = { exact: clip.deviceId };
         stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
@@ -346,6 +350,9 @@
       m.el.play().catch(() => {});
     } else if (clip.type === 'camera' || clip.type === 'screen') {
       startStream(clip, m);
+    } else if (clip.type === 'obs' && ObsWs.status !== 'ok') {
+      toast('O OBS não está conectado. Clique em “OBS” na barra de cima.');
+      obsWsConnect();
     }
   }
 
@@ -879,7 +886,8 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     else if (clip.type === 'text') thumb = `<div class="tthumb">${esc(getSlides(clip)[0] || '(vazio)')}</div>`;
     else if (clip.type === 'holyrics') thumb = `<div class="tthumb holy">${esc(Holy.text || (Holy.status === 'ok' ? '(nada no ar no Holyrics)' : 'Holyrics desconectado'))}</div>`;
     else if (clip.type === 'color') thumb = `<div class="cthumb" style="background:${esc(colorCss(clip))}"></div>`;
-    else if (clip.type === 'camera') thumb = `<div class="ithumb">📷</div>`;
+    else if (clip.type === 'camera') thumb = `<div class="ithumb">${clip.obsVirtual ? '🎥' : '📷'}</div>`;
+    else if (clip.type === 'obs') thumb = clip.thumb ? `<img src="${clip.thumb}" draggable="false" alt="">` : `<div class="ithumb">📺</div>`;
     else if (clip.type === 'screen') thumb = `<div class="ithumb">🖥</div>`;
     else if (clip.thumb) thumb = `<img src="${clip.thumb}" draggable="false" alt="">`;
     else thumb = `<div class="ithumb">⏳</div>`;
@@ -1230,6 +1238,8 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
       case 'camera': placeClip(layer, col, { id: uid(), type: 'camera', name: 'Câmera', deviceId: '', fit: 'cover', mirror: false }); return;
       case 'screen': placeClip(layer, col, { id: uid(), type: 'screen', name: 'Captura de tela', fit: 'contain' }); return;
       case 'ndi': addNdiClip(layer, col); return;
+      case 'obsvcam': addObsVirtualCamClip(layer, col); return;
+      case 'obssource': openObsDialog(layer.id, col); return;
       case 'holyrics': {
         const st = defaultTextStyle();
         placeClip(layer, col, { id: uid(), type: 'holyrics', name: 'Holyrics ao vivo', style: st });
@@ -1419,6 +1429,9 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
         break;
       case 'holyrics':
         holyControls(sec, clip);
+        break;
+      case 'obs':
+        obsClipControls(sec, clip);
         break;
       case 'camera': {
         const sel = h('select', {
@@ -2400,6 +2413,376 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   $('#saidasDlg').addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target === e.currentTarget) $('#saidasDlg').close(); });
   $('#saidasDlg').addEventListener('change', (e) => { if (e.target.type === 'checkbox') $('#btnSaidas').classList.toggle('active', !!rt.testPattern); });
 
+
+  // =====================================================================
+  // OBS Studio (servidor WebSocket que já vem no OBS 28 ou mais novo)
+  //   - lista cenas e fontes do OBS e usa qualquer uma como clipe (por imagens, até ~15 qps)
+  //   - liga a câmera virtual do OBS para trazer a câmera (placa de captura) em vídeo ao vivo
+  // =====================================================================
+  const ObsWs = {
+    ws: null, status: 'off', error: '', pending: new Map(), seq: 0, imgFormat: 'png',
+    scenes: [], inputs: [], vcam: null, retry: null, authFail: false, wasOk: false,
+  };
+
+  async function sha256b64(str) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    let bin = '';
+    new Uint8Array(buf).forEach((b) => { bin += String.fromCharCode(b); });
+    return btoa(bin);
+  }
+
+  function setObsWsStatus(status, error) {
+    const changed = ObsWs.status !== status;
+    ObsWs.status = status;
+    ObsWs.error = error || '';
+    const b = $('#btnObs');
+    if (b) b.dataset.state = status === 'ok' ? 'ok' : status === 'error' ? 'error' : 'off';
+    const st = $('#obsWsStatus');
+    if (st) st.textContent = obsWsStatusText();
+    const ist = $('#obsInspStatus');
+    if (ist) ist.textContent = obsWsStatusText();
+    if (changed && $('#obsDlg').open) renderObsDialog();
+  }
+
+  function obsWsStatusText() {
+    if (ObsWs.status === 'ok') return '✔ Conectado ao OBS' + (ObsWs.vcam === true ? ' · câmera virtual ligada' : ObsWs.vcam === false ? ' · câmera virtual desligada' : '');
+    if (ObsWs.status === 'connecting') return 'Conectando…';
+    if (ObsWs.status === 'error') return '⚠ ' + ObsWs.error;
+    return 'Desconectado';
+  }
+
+  function obsWsConnect() {
+    clearTimeout(ObsWs.retry);
+    if (ObsWs.ws && ObsWs.ws.readyState <= 1) return;
+    const cfg = P.obsWs;
+    let ws;
+    try { ws = new WebSocket(`ws://${cfg.host}:${cfg.port}`, 'obswebsocket.json'); } catch (_) {
+      setObsWsStatus('error', 'IP ou porta inválidos'); return;
+    }
+    ObsWs.ws = ws;
+    ObsWs.authFail = false;
+    ObsWs.wasOk = false;
+    setObsWsStatus('connecting');
+    ws.onmessage = async (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (_) { return; }
+      const d = msg.d || {};
+      if (msg.op === 0) { // Hello
+        const id = { rpcVersion: 1, eventSubscriptions: 4 | 8 | 64 }; // cenas, entradas, saídas
+        if (d.authentication) {
+          if (!cfg.password) { ObsWs.authFail = true; ws.close(); return; }
+          const secret = await sha256b64(cfg.password + d.authentication.salt);
+          id.authentication = await sha256b64(secret + d.authentication.challenge);
+        }
+        ws.send(JSON.stringify({ op: 1, d: id }));
+      } else if (msg.op === 2) { // Identified
+        ObsWs.wasOk = true;
+        P.obsWs.enabled = true; scheduleSave();
+        setObsWsStatus('ok');
+        obsWsReady();
+      } else if (msg.op === 7) { // RequestResponse
+        const p = ObsWs.pending.get(d.requestId);
+        if (!p) return;
+        ObsWs.pending.delete(d.requestId);
+        clearTimeout(p.t);
+        const rs = d.requestStatus || {};
+        if (rs.result) p.res(d.responseData || {});
+        else p.rej(Object.assign(new Error(rs.comment || `erro ${rs.code}`), { code: rs.code }));
+      } else if (msg.op === 5) obsWsEvent(d.eventType, d.eventData || {});
+    };
+    ws.onclose = (ev) => {
+      if (ObsWs.ws !== ws) return;
+      ObsWs.ws = null;
+      for (const p of ObsWs.pending.values()) { clearTimeout(p.t); p.rej(new Error('conexão com o OBS fechada')); }
+      ObsWs.pending.clear();
+      let msg;
+      if (ev.code === 4009) msg = 'senha do OBS incorreta';
+      else if (ObsWs.authFail) msg = 'o OBS pede senha: preencha a senha do servidor WebSocket';
+      else if (ObsWs.wasOk) msg = 'a conexão com o OBS caiu, tentando de novo…';
+      else msg = 'OBS não encontrado. Abra o OBS e ative Ferramentas → Configurações do servidor WebSocket';
+      setObsWsStatus('error', msg);
+      if (ev.code !== 4009 && !ObsWs.authFail && P.obsWs.enabled) ObsWs.retry = setTimeout(obsWsConnect, 5000);
+    };
+  }
+
+  function obsWsDisconnect() {
+    P.obsWs.enabled = false; scheduleSave();
+    clearTimeout(ObsWs.retry);
+    const ws = ObsWs.ws;
+    ObsWs.ws = null;
+    if (ws) try { ws.close(); } catch (_) { /* ok */ }
+    setObsWsStatus('off');
+  }
+
+  function obsCall(requestType, requestData) {
+    return new Promise((res, rej) => {
+      const ws = ObsWs.ws;
+      if (!ws || ws.readyState !== 1 || ObsWs.status !== 'ok') { rej(new Error('OBS não conectado')); return; }
+      const requestId = 'r' + (++ObsWs.seq);
+      const t = setTimeout(() => { ObsWs.pending.delete(requestId); rej(new Error('o OBS não respondeu')); }, 6000);
+      ObsWs.pending.set(requestId, { res, rej, t });
+      ws.send(JSON.stringify({ op: 6, d: { requestType, requestId, requestData: requestData || {} } }));
+    });
+  }
+
+  async function obsWsReady() {
+    try {
+      const v = await obsCall('GetVersion');
+      const f = (v.supportedImageFormats || []).map((x) => String(x).toLowerCase());
+      ObsWs.imgFormat = f.includes('jpg') ? 'jpg' : f.includes('jpeg') ? 'jpeg' : 'png';
+    } catch (_) { /* usa png */ }
+    await obsRefreshLists();
+    try { ObsWs.vcam = !!(await obsCall('GetVirtualCamStatus')).outputActive; } catch (_) { ObsWs.vcam = null; }
+    setObsWsStatus('ok');
+    if ($('#obsDlg').open) renderObsDialog();
+  }
+
+  async function obsRefreshLists() {
+    try {
+      const sl = await obsCall('GetSceneList');
+      ObsWs.scenes = (sl.scenes || []).slice().sort((a, b) => (b.sceneIndex || 0) - (a.sceneIndex || 0));
+      const il = await obsCall('GetInputList');
+      ObsWs.inputs = (il.inputs || []).filter((i) => !/wasapi|pulse|coreaudio|alsa|jack|audio_|_audio|sck_audio/i.test(i.inputKind || i.unversionedInputKind || ''));
+    } catch (_) { /* mantém as listas */ }
+    if ($('#obsDlg').open) renderObsSources();
+  }
+
+  let obsListTimer;
+  function obsWsEvent(type, data) {
+    if (type === 'VirtualcamStateChanged') { ObsWs.vcam = !!data.outputActive; setObsWsStatus('ok'); if ($('#obsDlg').open) renderObsDialog(); return; }
+    if (type === 'InputNameChanged') {
+      for (const c of Object.values(P.clips)) if (c.type === 'obs' && c.sourceName === data.oldInputName) { c.sourceName = data.inputName; refreshCell(c); }
+      scheduleSave();
+    }
+    if (type === 'SceneNameChanged') {
+      for (const c of Object.values(P.clips)) if (c.type === 'obs' && c.sourceName === data.oldSceneName) { c.sourceName = data.sceneName; refreshCell(c); }
+      scheduleSave();
+    }
+    if (/^(Scene(ListChanged|Created|Removed|NameChanged)|Input(Created|Removed|NameChanged))$/.test(type)) {
+      clearTimeout(obsListTimer);
+      obsListTimer = setTimeout(obsRefreshLists, 300);
+    }
+  }
+
+  function obsSourceRef(clip) {
+    return clip.sourceUuid ? { sourceUuid: clip.sourceUuid } : { sourceName: clip.sourceName };
+  }
+
+  async function obsScreenshot(ref, width, quality) {
+    const q = Object.assign({ imageFormat: ObsWs.imgFormat, imageWidth: Math.max(8, Math.round(width)) }, ref);
+    if (ObsWs.imgFormat !== 'png') q.imageCompressionQuality = quality || 85;
+    const r = await obsCall('GetSourceScreenshot', q);
+    const data = String(r.imageData || '');
+    return data.startsWith('data:') ? data : `data:image/${ObsWs.imgFormat === 'jpg' ? 'jpeg' : ObsWs.imgFormat};base64,${data}`;
+  }
+
+  // Quadros das fontes do OBS que estão no ar (pede uma imagem de cada vez por clipe)
+  const OBS_RES = { baixa: 640, media: 1280, alta: 1920 };
+  function obsClipActive(id) {
+    return P.layers.some((l) => { const r = rt.layers[l.id]; return r && ((r.current && r.current.clipId === id) || (r.prev && r.prev.clipId === id)); });
+  }
+  setInterval(() => {
+    if (ObsWs.status !== 'ok') return;
+    const now = performance.now();
+    for (const clip of Object.values(P.clips)) {
+      if (clip.type !== 'obs' || !obsClipActive(clip.id)) continue;
+      const m = ensureMedia(clip);
+      if (m.busy || now - (m.last || 0) < 1000 / (clip.fps || 10)) continue;
+      m.busy = true; m.last = now;
+      obsScreenshot(obsSourceRef(clip), Math.min(P.width, OBS_RES[clip.res] || 1280))
+        .then(async (url) => {
+          const img = new Image();
+          img.src = url;
+          await img.decode();
+          m.el = img; m.ready = true;
+          if (m.error) { m.error = null; refreshCell(clip); }
+        })
+        .catch((e) => {
+          if (e.code === 600 && !m.error) { m.error = 'Fonte não encontrada no OBS'; refreshCell(clip); toast(`OBS: a fonte “${clip.sourceName}” não existe mais.`); }
+        })
+        .finally(() => { m.busy = false; });
+    }
+  }, 20);
+
+  async function findVideoDevice(re) {
+    const list = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+    let devs = await list();
+    if (!devs.some((d) => d.label)) {
+      const s = await navigator.mediaDevices.getUserMedia({ video: true });
+      s.getTracks().forEach((t) => t.stop());
+      devs = await list();
+    }
+    const d = devs.find((x) => re.test(x.label));
+    return d ? d.deviceId : '';
+  }
+  const OBS_VCAM_RE = /obs.*virtual|virtual.*obs/i;
+
+  async function prepareObsVirtualCam(clip) {
+    if (ObsWs.status === 'ok') {
+      try {
+        const st = await obsCall('GetVirtualCamStatus');
+        if (!st.outputActive) { await obsCall('StartVirtualCam'); await new Promise((r) => setTimeout(r, 900)); }
+      } catch (_) { /* segue com o que tiver */ }
+    }
+    try {
+      const id = await findVideoDevice(OBS_VCAM_RE);
+      if (id && id !== clip.deviceId) { clip.deviceId = id; scheduleSave(); }
+    } catch (_) { /* sem permissão: o getUserMedia logo abaixo vai avisar */ }
+  }
+
+  async function addObsVirtualCamClip(layer, col) {
+    const clip = { id: uid(), type: 'camera', name: 'Câmera virtual do OBS', deviceId: '', fit: 'cover', mirror: false, obsVirtual: true };
+    placeClip(layer, col, clip);
+    if (!P.obsWs.enabled) toast('Dica: conecte o OBS (botão “OBS” lá em cima) para o programa ligar a câmera virtual sozinho.', 7000);
+    try {
+      const id = await findVideoDevice(OBS_VCAM_RE);
+      if (!id) toast('Não achei a “OBS Virtual Camera”. Abra o OBS e clique uma vez em “Iniciar câmera virtual”.', 8000);
+      else { clip.deviceId = id; scheduleSave(); if (ui.selClip === clip.id) renderInspector(); }
+    } catch (_) { toast('O navegador não deu acesso às câmeras. Clique no ícone de câmera na barra de endereço e permita.', 7000); }
+  }
+
+  function obsClipControls(sec, clip) {
+    sec.append(h('div', { class: 'holy-status', id: 'obsInspStatus' }, obsWsStatusText()));
+    const sel = h('select', {
+      onchange: () => {
+        const [kind, uuid] = sel.value.split('|');
+        const item = (kind === 's' ? ObsWs.scenes : ObsWs.inputs).find((x) => (x.sceneUuid || x.inputUuid) === uuid);
+        if (!item) return;
+        clip.sourceUuid = uuid;
+        clip.sourceName = item.sceneName || item.inputName;
+        clip.thumb = null;
+        const m = rt.media[clip.id]; if (m) m.error = null;
+        refreshCell(clip); scheduleSave();
+      },
+    });
+    const opts = [];
+    if (!ObsWs.scenes.some((x) => x.sceneUuid === clip.sourceUuid) && !ObsWs.inputs.some((x) => x.inputUuid === clip.sourceUuid)) {
+      opts.push(h('option', { value: '' }, clip.sourceName || '(escolha)'));
+    }
+    if (ObsWs.scenes.length) opts.push(h('optgroup', { label: 'Cenas' }, ObsWs.scenes.map((x) => h('option', { value: 's|' + x.sceneUuid }, x.sceneName))));
+    if (ObsWs.inputs.length) opts.push(h('optgroup', { label: 'Fontes' }, ObsWs.inputs.map((x) => h('option', { value: 'i|' + x.inputUuid }, x.inputName))));
+    sel.append(...opts);
+    sel.value = ObsWs.scenes.some((x) => x.sceneUuid === clip.sourceUuid) ? 's|' + clip.sourceUuid
+      : ObsWs.inputs.some((x) => x.inputUuid === clip.sourceUuid) ? 'i|' + clip.sourceUuid : '';
+    sec.append(field('Cena / fonte', sel));
+    sec.append(selectF('Quadros/s', clip, 'fps', [['5', '5 (leve)'], ['10', '10'], ['15', '15 (pesado)']], () => { clip.fps = +clip.fps; }));
+    sec.append(selectF('Qualidade', clip, 'res', [['baixa', 'Baixa (640)'], ['media', 'Média (1280)'], ['alta', 'Alta (1920)']]));
+    sec.append(selectF('Ajuste', clip, 'fit', FIT_OPTS));
+    sec.append(h('div', { class: 'hint' }, 'Este modo copia imagens do OBS (bom para slides, logos e cenas paradas). Para câmera em movimento, use “OBS — câmera virtual”, que é vídeo ao vivo de verdade.'));
+    sec.append(h('div', { class: 'btn-row' }, h('button', { class: 'btn small', onclick: () => openObsDialog() }, '⚙ Conexão com o OBS')));
+  }
+
+  function obsClipFor(item, isScene) {
+    return {
+      id: uid(), type: 'obs', name: (isScene ? item.sceneName : item.inputName) || 'OBS',
+      sourceName: isScene ? item.sceneName : item.inputName, sourceUuid: isScene ? item.sceneUuid : item.inputUuid,
+      fps: 10, res: 'media', fit: 'cover', thumb: null,
+    };
+  }
+
+  // ---------- janela do OBS ----------
+  const obsUi = { layerId: null, col: 0 };
+  function openObsDialog(layerId, col) {
+    obsUi.layerId = layerId || obsUi.layerId || (P.layers[1] || P.layers[0]).id;
+    obsUi.col = col || 0;
+    renderObsDialog();
+    if (!$('#obsDlg').open) $('#obsDlg').showModal();
+    if (ObsWs.status === 'ok') obsRefreshLists();
+  }
+
+  function renderObsDialog() {
+    const body = $('#obsBody');
+    const cfg = P.obsWs;
+    body.innerHTML = '';
+    const inp = (key, type, ph, conv) => { const i = h('input', { type, value: cfg[key], placeholder: ph || '', oninput: () => { cfg[key] = conv ? conv(i.value) : i.value; scheduleSave(); } }); return i; };
+    body.append(h('section', { class: 'holy-conn' },
+      h('div', { class: 'holy-row' },
+        h('label', {}, 'IP do computador do OBS', inp('host', 'text', '127.0.0.1', (v) => v.trim())),
+        h('label', {}, 'Porta', inp('port', 'number', '4455', (v) => parseInt(v, 10) || 4455)),
+        h('label', { class: 'grow' }, 'Senha do WebSocket', inp('password', 'password', 'deixe vazio se não tiver senha')),
+        h('button', { class: 'btn primary', onclick: () => { obsWsDisconnect(); P.obsWs.enabled = true; obsWsConnect(); } }, 'Conectar'),
+        ObsWs.status === 'ok' ? h('button', { class: 'btn small', onclick: () => { obsWsDisconnect(); renderObsDialog(); } }, 'Desconectar') : null),
+      h('div', { class: 'hint', id: 'obsWsStatus' }, obsWsStatusText()),
+      h('div', { class: 'hint' }, 'No OBS: menu Ferramentas → Configurações do servidor WebSocket → marque “Ativar servidor WebSocket”. ',
+        'Em “Mostrar informações de conexão” estão a porta e a senha. Funciona com o OBS neste mesmo computador (IP 127.0.0.1).')));
+
+    // câmera virtual
+    const vc = h('section', { class: 'out-sec' },
+      h('h3', {}, '🎥 Câmera do OBS em vídeo ao vivo (câmera virtual)'),
+      h('div', { class: 'hint' },
+        'A placa de captura só pode ser usada por um programa de cada vez — como ela já está no OBS, o OBS repassa a imagem pela “câmera virtual”. ',
+        h('b', {}, 'No OBS 30 ou mais novo: '), 'clique na engrenagem ⚙ ao lado de “Iniciar câmera virtual” → Tipo de saída: ', h('b', {}, 'Fonte'),
+        ' → escolha a placa de captura. Assim vem só a câmera, e o que vai para a transmissão não muda.'),
+      h('div', { class: 'out-row' },
+        h('span', { class: 'status' + (ObsWs.vcam ? ' on' : '') }, ObsWs.vcam ? '● Câmera virtual ligada' : ObsWs.vcam === false ? 'Câmera virtual desligada' : 'Estado desconhecido'),
+        h('button', { class: 'btn small', disabled: ObsWs.status !== 'ok', onclick: () => obsCall(ObsWs.vcam ? 'StopVirtualCam' : 'StartVirtualCam').catch((e) => toast('OBS: ' + e.message)) }, ObsWs.vcam ? 'Desligar' : 'Ligar'),
+        h('button', {
+          class: 'btn small primary', onclick: () => {
+            const layer = layerById(obsUi.layerId) || P.layers[0];
+            let col = layer.clips.findIndex((x, i) => !x && i >= obsUi.col);
+            if (col < 0) { col = P.columns; addColumns(1); }
+            $('#obsDlg').close();
+            addObsVirtualCamClip(layer, col);
+          },
+        }, '＋ Adicionar câmera virtual como clipe')));
+
+    // cenas e fontes
+    const layerSel = h('select', { onchange: () => { obsUi.layerId = layerSel.value; } }, P.layers.slice().reverse().map((l) => h('option', { value: l.id }, l.name)));
+    layerSel.value = obsUi.layerId;
+    const src = h('section', { class: 'out-sec' },
+      h('h3', {}, '📺 Cenas e fontes do OBS'),
+      h('div', { class: 'hint' }, 'Clique numa cena ou fonte para criar um clipe com ela. A imagem é copiada do OBS de 5 a 15 vezes por segundo: ótimo para slides, logos, Bíblia e cenas paradas.'),
+      h('div', { class: 'holy-row' }, h('label', {}, 'Colocar na camada', layerSel), h('button', { class: 'btn small', onclick: () => obsRefreshLists() }, '↻ Atualizar lista')),
+      h('div', { id: 'obsSources', class: 'holy-list' }));
+    body.append(vc, src);
+    renderObsSources();
+  }
+
+  let obsThumbToken = 0;
+  async function renderObsSources() {
+    const box = $('#obsSources');
+    if (!box) return;
+    box.innerHTML = '';
+    if (ObsWs.status !== 'ok') { box.append(h('div', { class: 'muted' }, 'Conecte ao OBS para ver as cenas e fontes.')); return; }
+    const items = [...ObsWs.scenes.map((x) => [x, true]), ...ObsWs.inputs.map((x) => [x, false])];
+    if (!items.length) { box.append(h('div', { class: 'muted' }, 'Nenhuma cena ou fonte encontrada.')); return; }
+    const grid = h('div', { class: 'file-grid' });
+    const tiles = [];
+    for (const [item, isScene] of items) {
+      const img = h('img', { alt: '' });
+      const tile = h('div', { class: 'file-tile', title: 'Criar clipe com esta ' + (isScene ? 'cena' : 'fonte') },
+        h('div', { class: 'ithumb tile-ph' }, isScene ? '🎬' : '📺'), img,
+        h('div', { class: 'cname' }, h('span', { class: 'muted' }, isScene ? 'Cena · ' : 'Fonte · '), (isScene ? item.sceneName : item.inputName)));
+      tile.addEventListener('click', () => {
+        const layer = layerById(obsUi.layerId) || P.layers[0];
+        let col = layer.clips.findIndex((x, i) => !x && i >= obsUi.col);
+        if (col < 0) { col = P.columns; addColumns(1); }
+        const clip = obsClipFor(item, isScene);
+        if (img.src) clip.thumb = img.src;
+        P.clips[clip.id] = clip;
+        layer.clips[col] = clip.id;
+        renderDeck(); scheduleSave();
+        tile.classList.add('done');
+        toast(`“${clip.name}” adicionado na camada ${layer.name}.`);
+      });
+      tiles.push([tile, img, item, isScene]);
+      grid.append(tile);
+    }
+    box.append(grid);
+    // miniaturas, uma de cada vez
+    const tok = ++obsThumbToken;
+    for (const [tile, img, item, isScene] of tiles) {
+      if (tok !== obsThumbToken || !$('#obsDlg').open) return;
+      try {
+        img.src = await obsScreenshot(isScene ? { sourceUuid: item.sceneUuid } : { sourceUuid: item.inputUuid }, 192, 70);
+        tile.classList.add('has-img');
+      } catch (_) { /* fonte sem imagem (ex.: áudio) */ }
+    }
+  }
+
+  $('#btnObs').addEventListener('click', () => openObsDialog());
+  $('#obsDlg').addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target === e.currentTarget) $('#obsDlg').close(); });
+
   // =====================================================================
   // Inicialização
   // =====================================================================
@@ -2417,8 +2800,9 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     await detectBridge();
     holyPoll();
     obsStart();
+    if (P.obsWs.enabled) obsWsConnect();
     // expõe para depuração no console
-    window.CDL = { get project() { return P; }, rt, Holy, Obs, triggerColumn, clearAll };
+    window.CDL = { get project() { return P; }, rt, Holy, Obs, ObsWs, triggerColumn, clearAll };
   }
   init();
 })();

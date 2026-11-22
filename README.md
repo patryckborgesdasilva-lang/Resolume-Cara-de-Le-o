@@ -107,6 +107,30 @@ porta e token → **Testar conexão**. A bolinha do botão fica verde quando est
 > de slides. Por isso os fundos vêm da pasta de mídia, e versículos aparecem apenas no clipe *Holyrics ao vivo*
 > quando o Holyrics enviar o texto.
 
+## OBS como entrada (cenas, fontes e a câmera da placa de captura)
+
+O programa conversa com o OBS pelo **servidor WebSocket que já vem no OBS** (versão 28 ou mais nova).
+Funciona com o OBS no mesmo computador e não precisa da ponte.
+
+**1. No OBS:** menu **Ferramentas → Configurações do servidor WebSocket** → marque **Ativar servidor WebSocket**.
+Em *Mostrar informações de conexão* estão a porta (normalmente 4455) e a senha.
+
+**2. Aqui:** botão **OBS** na barra de cima → senha → **Conectar**. A bolinha fica verde e o programa reconecta
+sozinho nas próximas vezes.
+
+| Recurso | Como | Ideal para |
+|---|---|---|
+| 🎥 **OBS — câmera virtual** | `+` → *OBS — câmera virtual*. O programa liga a câmera virtual do OBS sozinho quando o clipe vai pro ar. | **Câmera da placa de captura**, em vídeo ao vivo e qualidade total |
+| 📺 **Cena ou fonte do OBS** | `+` → *Cena ou fonte do OBS…* → clique na cena/fonte (aparecem com miniatura). | Slides, logos, cenas paradas (5 a 15 imagens por segundo) |
+
+**Por que a câmera vem pela câmera virtual?** No Windows a placa de captura só pode ser aberta por **um programa
+de cada vez**. Como ela já está no OBS, o OBS repassa a imagem. No **OBS 30 ou mais novo**, clique na
+engrenagem ⚙ ao lado de *Iniciar câmera virtual* → **Tipo de saída: Fonte** → escolha a placa de captura.
+Assim chega só a câmera, e o que vai para a transmissão não muda.
+
+> O OBS tem uma câmera virtual só. Para trazer mais de uma câmera do OBS, use o plugin DistroAV (NDI) no OBS e o
+> NDI Webcam Input (veja NDI abaixo).
+
 ## NDI (câmeras pela rede)
 
 O navegador não recebe NDI diretamente, então usamos a ferramenta gratuita da própria NDI que transforma uma fonte

@@ -58,7 +58,7 @@ kbd {
 .status { font-size: 12px; padding: 3px 8px; border-radius: 99px; background: var(--panel2); color: var(--muted); }
 .status.on { background: rgba(46, 204, 113, .15); color: var(--ok); }
 
-select, input[type=text], input[type=number], textarea {
+select, input[type=text], input[type=number], input[type=password], textarea {
   background: #0f1115; border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px;
 }
 input[type=range] { accent-color: var(--accent); }
@@ -302,3 +302,6 @@ dialog.wide { max-width: 900px; }
 @media (max-width: 1600px) {
   .field.res-label .lbl, #outStatus { display: none; }
 }
+
+.file-tile img:not([src]) { display: none; }
+.file-tile.has-img .tile-ph { display: none; }

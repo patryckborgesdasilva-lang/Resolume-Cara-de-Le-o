@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cara de Leão — Projeção</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🦁 Cara de Leão <span>Projeção</span></div>
+
+    <button id="btnOutput" class="btn primary" title="Abre a janela que vai para o projetor">📽 Abrir projetor</button>
+    <span id="outStatus" class="status off">Projetor fechado</span>
+
+    <label class="field">Resolução
+      <select id="selRes" title="Resolução da saída (use a do seu projetor/TV)"></select>
+    </label>
+
+    <div class="spacer"></div>
+
+    <label class="field master" title="Brilho geral da saída">Master
+      <input type="range" id="master" min="0" max="1" step="0.01">
+      <span id="masterVal">100%</span>
+    </label>
+    <button id="btnBlackout" class="btn" title="Escurece tudo (tecla B ou .)">⬛ Blackout <kbd>B</kbd></button>
+    <button id="btnClearAll" class="btn" title="Tira todas as camadas do ar">Limpar tudo</button>
+    <button id="btnMenu" class="btn" title="Mais opções">☰</button>
+  </header>
+
+  <main class="layout">
+    <section class="left">
+      <div class="deck-wrap">
+        <div id="deck" class="deck"></div>
+      </div>
+      <div id="slidesPanel" class="slides-panel"></div>
+    </section>
+
+    <aside class="right">
+      <div class="monitor">
+        <div class="monitor-label"><span class="dot"></span> SAÍDA <span id="fps" class="muted"></span></div>
+        <canvas id="comp"></canvas>
+      </div>
+      <div id="inspector" class="inspector"></div>
+    </aside>
+  </main>
+
+  <!-- Menu para adicionar clipe numa célula vazia -->
+  <div id="addMenu" class="popover hidden">
+    <button data-add="file">🎬 Vídeo ou imagem…</button>
+    <button data-add="text">🔤 Texto / Letra de música</button>
+    <button data-add="color">🎨 Cor ou degradê</button>
+    <button data-add="camera">📷 Câmera / placa de captura</button>
+    <button data-add="screen">🖥 Janela ou tela do computador</button>
+  </div>
+
+  <!-- Menu principal -->
+  <div id="mainMenu" class="popover hidden">
+    <button data-menu="addlayer">➕ Adicionar camada</button>
+    <button data-menu="addcol">➕ Adicionar coluna</button>
+    <button data-menu="screen2">🖥 Mover projetor para a 2ª tela</button>
+    <button data-menu="help">❓ Atalhos e ajuda</button>
+    <hr>
+    <button data-menu="new" class="danger">🗑 Novo projeto (apagar tudo)</button>
+  </div>
+
+  <input type="file" id="fileInput" multiple accept="video/*,image/*" hidden>
+  <div id="toast" class="toast"></div>
+
+  <dialog id="helpDlg">
+    <h2>Atalhos e ajuda</h2>
+    <table class="keys">
+      <tr><td><kbd>→</kbd> <kbd>↓</kbd> <kbd>PageDown</kbd></td><td>Próximo slide da letra (funciona com passador de slides)</td></tr>
+      <tr><td><kbd>←</kbd> <kbd>↑</kbd> <kbd>PageUp</kbd></td><td>Slide anterior</td></tr>
+      <tr><td><kbd>C</kbd></td><td>Tira a letra do ar (limpa a camada da letra)</td></tr>
+      <tr><td><kbd>B</kbd> ou <kbd>.</kbd></td><td>Blackout (tela preta) liga/desliga</td></tr>
+      <tr><td><kbd>1</kbd> … <kbd>9</kbd></td><td>Dispara a coluna inteira</td></tr>
+      <tr><td><kbd>Delete</kbd></td><td>Remove o clipe selecionado</td></tr>
+      <tr><td><kbd>F</kbd> / duplo clique</td><td>(na janela do projetor) Tela cheia</td></tr>
+    </table>
+    <h3>Como funciona</h3>
+    <ul>
+      <li><b>Camadas</b>: a de cima fica por cima. Ex.: Fundo (vídeo) → Mídia (logo/avisos) → Letras.</li>
+      <li><b>Clique</b> num clipe para colocá-lo no ar na sua camada. Clique com o botão direito (ou no ✎) para só editar.</li>
+      <li><b>Arraste</b> vídeos e imagens do computador direto para as células. Arraste clipes entre células para reorganizar.</li>
+      <li>No clipe de <b>texto</b>, cada <b>linha em branco</b> cria um novo slide.</li>
+      <li>Tudo é salvo automaticamente neste navegador (inclusive os vídeos).</li>
+    </ul>
+    <div class="dlg-actions"><button class="btn primary" data-close>Fechar</button></div>
+  </dialog>
+
+  <script src="js/app.js"></script>
+</body>
+</html>

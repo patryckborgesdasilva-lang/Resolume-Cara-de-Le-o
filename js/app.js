@@ -1,0 +1,1620 @@
+/*
+ * Cara de Leão — Projeção
+ * Mixer de vídeo em camadas para projeção na igreja (estilo Resolume), 100% no navegador.
+ *
+ * Estrutura:
+ *   P   = projeto salvo (camadas, clipes, configurações) — vai para o IndexedDB
+ *   rt  = estado de execução (elementos de mídia, transições, janela do projetor) — não é salvo
+ *   ui  = seleção atual da interface
+ */
+(function () {
+  'use strict';
+
+  // =====================================================================
+  // Utilitários
+  // =====================================================================
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+  const uid = () => Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-5);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  function h(tag, props, ...kids) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+      if (v == null || v === false) continue;
+      if (k === 'class') e.className = v;
+      else if (k === 'style') e.style.cssText = v;
+      else if (k.startsWith('on') && typeof v === 'function') e.addEventListener(k.slice(2), v);
+      else if (k in e) { try { e[k] = v; } catch (_) { e.setAttribute(k, v); } }
+      else e.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) {
+      if (kid == null || kid === false) continue;
+      e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    }
+    return e;
+  }
+
+  let toastTimer;
+  function toast(msg, ms = 3500) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+  }
+
+  // =====================================================================
+  // Armazenamento (IndexedDB): projeto + arquivos de mídia
+  // =====================================================================
+  const DB = (() => {
+    let dbp = null;
+    function open() {
+      if (!dbp) {
+        dbp = new Promise((res, rej) => {
+          const r = indexedDB.open('cara-de-leao-projecao', 1);
+          r.onupgradeneeded = () => {
+            const db = r.result;
+            if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+            if (!db.objectStoreNames.contains('media')) db.createObjectStore('media');
+          };
+          r.onsuccess = () => res(r.result);
+          r.onerror = () => rej(r.error);
+        });
+      }
+      return dbp;
+    }
+    async function tx(store, mode, fn) {
+      const db = await open();
+      return new Promise((res, rej) => {
+        const t = db.transaction(store, mode);
+        const req = fn(t.objectStore(store));
+        t.oncomplete = () => res(req ? req.result : undefined);
+        t.onerror = () => rej(t.error);
+        t.onabort = () => rej(t.error);
+      });
+    }
+    return {
+      get: (store, key) => tx(store, 'readonly', (s) => s.get(key)),
+      put: (store, key, val) => tx(store, 'readwrite', (s) => s.put(val, key)),
+      del: (store, key) => tx(store, 'readwrite', (s) => s.delete(key)),
+      clear: (store) => tx(store, 'readwrite', (s) => s.clear()),
+    };
+  })();
+
+  // =====================================================================
+  // Constantes e padrões
+  // =====================================================================
+  const BLENDS = [
+    ['source-over', 'Normal'],
+    ['screen', 'Tela (Screen)'],
+    ['lighter', 'Adicionar (Add)'],
+    ['multiply', 'Multiplicar'],
+    ['overlay', 'Sobrepor'],
+    ['soft-light', 'Luz suave'],
+    ['difference', 'Diferença'],
+    ['luminosity', 'Luminosidade'],
+  ];
+  const FONTS = ['Arial', 'Arial Black', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Segoe UI',
+    'Calibri', 'Georgia', 'Times New Roman', 'Impact', 'Courier New'];
+  const RESOLUTIONS = [
+    [1920, 1080, 'Full HD 16:9'], [1280, 720, 'HD 16:9'], [3840, 2160, '4K 16:9'],
+    [1024, 768, 'Projetor 4:3'], [1400, 1050, 'Projetor 4:3 (SXGA+)'], [1280, 800, 'Projetor 16:10'],
+    [1920, 1200, '16:10 (WUXGA)'], [1080, 1920, 'Vertical 9:16'],
+  ];
+  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera', screen: 'Captura de tela' };
+  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA' };
+  const FIT_OPTS = [['cover', 'Preencher (corta bordas)'], ['contain', 'Encaixar (sem cortar)'], ['stretch', 'Esticar']];
+
+  const defaultFx = () => ({ brightness: 100, contrast: 100, saturate: 100, hue: 0, blur: 0, zoom: 100 });
+  const defaultTextStyle = () => ({
+    font: 'Arial', size: 80, bold: true, italic: false, uppercase: false,
+    color: '#ffffff', outline: 3, outlineColor: '#000000', shadow: true,
+    align: 'center', valign: 'middle',
+    box: 'none', boxColor: '#000000', boxOpacity: 0.55,
+    margin: 90, lineHeight: 1.2, transition: 0.3,
+  });
+  const TEXT_PRESETS = {
+    'Letra (centro)': { valign: 'middle', align: 'center', size: 80, box: 'none', outline: 3, shadow: true, margin: 90, uppercase: false, italic: false },
+    'Legenda (rodapé)': { valign: 'bottom', align: 'center', size: 54, box: 'band', boxOpacity: 0.6, outline: 0, shadow: false, margin: 50, uppercase: false, italic: false },
+    'Versículo': { valign: 'middle', align: 'center', size: 64, box: 'box', boxOpacity: 0.5, outline: 0, shadow: true, margin: 140, uppercase: false, italic: false },
+    'Título': { valign: 'middle', align: 'center', size: 130, box: 'none', outline: 4, shadow: true, margin: 80, uppercase: true, italic: false },
+  };
+
+  function newLayer(name, cols) {
+    return { id: uid(), name, opacity: 1, blend: 'source-over', fade: 0.6, bypass: false, fx: defaultFx(), clips: Array(cols).fill(null) };
+  }
+  function newTextClip(name, text, presetName) {
+    const style = defaultTextStyle();
+    if (presetName) Object.assign(style, TEXT_PRESETS[presetName]);
+    return { id: uid(), type: 'text', name, text, slide: 0, style };
+  }
+  function newColorClip(name, color, color2, gradient, dir) {
+    return { id: uid(), type: 'color', name, color, color2: color2 || '#000000', gradient: !!gradient, dir: dir || 'vertical' };
+  }
+
+  function defaultProject() {
+    const cols = 8;
+    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {} };
+    // camadas ficam guardadas de baixo (índice 0) para cima
+    const fundo = newLayer('Fundo', cols);
+    const midia = newLayer('Mídia', cols);
+    const letras = newLayer('Letras', cols);
+    letras.fade = 0.4;
+    p.layers.push(fundo, midia, letras);
+
+    const add = (layer, col, clip) => { p.clips[clip.id] = clip; layer.clips[col] = clip.id; };
+    add(fundo, 0, newColorClip('Degradê azul', '#0d2a6b', '#02040c', true, 'vertical'));
+    add(fundo, 1, newColorClip('Degradê dourado', '#5a3a00', '#0a0600', true, 'radial'));
+    add(fundo, 2, newColorClip('Preto', '#000000', '#000000', false));
+    add(letras, 0, newTextClip('Exemplo de letra',
+      'Bem-vindos!\n\nDigite a letra da música\nno painel à direita\n\nDeixe uma linha em branco\npara criar um novo slide\n\nUse → e ← (ou o passador)\npara trocar os slides'));
+    add(letras, 1, newTextClip('Versículo',
+      'Porque Deus amou o mundo de tal maneira\nque deu o seu Filho unigênito,\npara que todo aquele que nele crê\nnão pereça, mas tenha a vida eterna.\n\nJoão 3:16', 'Versículo'));
+    return p;
+  }
+
+  // Garante que um projeto salvo (talvez de versão antiga) tenha todos os campos
+  function normalize(p) {
+    const d = defaultProject();
+    for (const k of ['width', 'height', 'columns', 'master', 'masterFade']) if (typeof p[k] !== 'number') p[k] = d[k];
+    p.clips = p.clips || {};
+    p.layers = Array.isArray(p.layers) && p.layers.length ? p.layers : d.layers;
+    for (const l of p.layers) {
+      l.fx = Object.assign(defaultFx(), l.fx);
+      if (typeof l.opacity !== 'number') l.opacity = 1;
+      if (typeof l.fade !== 'number') l.fade = 0.6;
+      l.blend = l.blend || 'source-over';
+      l.clips = Array.isArray(l.clips) ? l.clips : [];
+      while (l.clips.length < p.columns) l.clips.push(null);
+      l.clips = l.clips.slice(0, p.columns).map((id) => (id && p.clips[id] ? id : null));
+    }
+    for (const c of Object.values(p.clips)) {
+      if (c.type === 'text') { c.style = Object.assign(defaultTextStyle(), c.style); c.slide = c.slide || 0; c.text = c.text || ''; }
+      if (c.type === 'video') { c.speed = c.speed || 1; c.volume = c.volume == null ? 1 : c.volume; c.loop = c.loop !== false; }
+      if (!c.fit && c.type !== 'text' && c.type !== 'color') c.fit = 'cover';
+    }
+    return p;
+  }
+
+  // =====================================================================
+  // Estado
+  // =====================================================================
+  let P = null;
+  const ui = { selClip: null, selLayer: null, addTarget: null, slidesClip: null };
+  const rt = {
+    layers: {},          // id da camada -> { current, prev, t0, canvas, ctx }
+    media: {},           // id do clipe -> { el, url, ready, stream, error }
+    textAnim: {},        // id do clipe -> { from, t0 } (transição entre slides)
+    liveText: null,      // último clipe de texto colocado no ar
+    blackout: false,
+    blackLevel: 0,       // 0 = normal, 1 = preto
+    lastNow: 0,
+    outWin: null, outCanvas: null, outCtx: null,
+  };
+  const pendingBlobs = new Map(); // arquivos importados nesta sessão (chave -> File)
+  const cellEls = new Map();
+  const progEls = new Map();
+
+  const comp = $('#comp');
+  const ctx = comp.getContext('2d', { alpha: false });
+
+  function layerRt(id) {
+    return rt.layers[id] || (rt.layers[id] = { current: null, prev: null, t0: 0, canvas: null, ctx: null });
+  }
+  const layerById = (id) => P.layers.find((l) => l.id === id);
+  const layerOfClip = (clipId) => P.layers.find((l) => l.clips.includes(clipId));
+  const isLive = (clipId) => P.layers.some((l) => { const r = rt.layers[l.id]; return r && r.current && r.current.clipId === clipId; });
+
+  // =====================================================================
+  // Salvamento automático
+  // =====================================================================
+  let saveTimer = null;
+  let saveWarned = false;
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveNow, 400);
+  }
+  async function saveNow() {
+    try { await DB.put('kv', 'project', P); } catch (e) {
+      console.warn('Falha ao salvar', e);
+      if (!saveWarned) { saveWarned = true; toast('Não foi possível salvar no navegador. As mudanças valem só até fechar a página.'); }
+    }
+  }
+
+  // =====================================================================
+  // Mídia (vídeo, imagem, câmera, captura de tela)
+  // =====================================================================
+  function ensureMedia(clip) {
+    let m = rt.media[clip.id];
+    if (m) return m;
+    m = rt.media[clip.id] = { el: null, url: null, ready: false, stream: null, error: null };
+    if (clip.type === 'video' || clip.type === 'image') loadMediaBlob(clip, m);
+    return m;
+  }
+
+  async function loadMediaBlob(clip, m) {
+    let blob = pendingBlobs.get(clip.mediaKey);
+    if (!blob) { try { blob = await DB.get('media', clip.mediaKey); } catch (_) { blob = null; } }
+    if (rt.media[clip.id] !== m) return; // clipe removido enquanto carregava
+    if (!blob) { m.error = 'Arquivo não encontrado'; refreshCell(clip); return; }
+    m.url = URL.createObjectURL(blob);
+    if (clip.type === 'video') {
+      const v = document.createElement('video');
+      v.preload = 'auto';
+      v.playsInline = true;
+      v.loop = clip.loop;
+      v.muted = !!clip.muted;
+      v.addEventListener('loadeddata', () => {
+        m.ready = true;
+        if (!clip.thumb) makeThumb(clip);
+        if (isLive(clip.id) && v.paused) v.play().catch(() => {});
+      }, { once: true });
+      v.addEventListener('error', () => { m.error = 'Formato de vídeo não suportado'; refreshCell(clip); toast(`"${clip.name}": formato não suportado pelo navegador. Use MP4 (H.264) ou WebM.`, 6000); });
+      v.src = m.url;
+      m.el = v;
+    } else {
+      const img = new Image();
+      img.onload = () => { m.ready = true; if (!clip.thumb) makeThumb(clip); };
+      img.onerror = () => { m.error = 'Imagem inválida'; refreshCell(clip); };
+      img.src = m.url;
+      m.el = img;
+    }
+  }
+
+  function makeThumb(clip) {
+    const m = rt.media[clip.id];
+    if (!m || !m.el) return;
+    const draw = () => {
+      const el = m.el;
+      const sw = el.videoWidth || el.naturalWidth, sh = el.videoHeight || el.naturalHeight;
+      if (!sw || !sh) return;
+      const tc = document.createElement('canvas');
+      tc.width = 192; tc.height = 108;
+      const t = tc.getContext('2d');
+      t.fillStyle = '#000'; t.fillRect(0, 0, 192, 108);
+      const s = clip.fit === 'contain' ? Math.min(192 / sw, 108 / sh) : Math.max(192 / sw, 108 / sh);
+      t.drawImage(el, (192 - sw * s) / 2, (108 - sh * s) / 2, sw * s, sh * s);
+      try { clip.thumb = tc.toDataURL('image/jpeg', 0.72); } catch (_) { return; }
+      refreshCell(clip);
+      scheduleSave();
+    };
+    if (clip.type === 'video') {
+      const v = m.el;
+      const onSeek = () => {
+        v.removeEventListener('seeked', onSeek);
+        draw();
+        if (!isLive(clip.id)) v.currentTime = 0;
+      };
+      v.addEventListener('seeked', onSeek);
+      v.currentTime = Math.min((v.duration || 0) * 0.15, 3) || 0.01;
+    } else draw();
+  }
+
+  async function startStream(clip, m) {
+    if (m.stream && m.stream.active) return;
+    if (m.starting) return;
+    m.starting = true;
+    try {
+      let stream;
+      if (clip.type === 'camera') {
+        const video = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+        if (clip.deviceId) video.deviceId = { exact: clip.deviceId };
+        stream = await navigator.mediaDevices.getUserMedia({ video, audio: false });
+      } else {
+        stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false });
+      }
+      if (rt.media[clip.id] !== m) { stream.getTracks().forEach((t) => t.stop()); return; }
+      const v = m.el || document.createElement('video');
+      v.muted = true; v.playsInline = true;
+      v.srcObject = stream;
+      m.el = v; m.stream = stream; m.error = null;
+      stream.getVideoTracks().forEach((t) => t.addEventListener('ended', () => {
+        if (m.stream === stream) { m.stream = null; m.ready = false; }
+      }));
+      await v.play().catch(() => {});
+      m.ready = true;
+      refreshCell(clip);
+    } catch (e) {
+      m.error = clip.type === 'camera' ? 'Câmera indisponível' : 'Captura cancelada';
+      toast(clip.type === 'camera'
+        ? 'Não foi possível abrir a câmera. Verifique a permissão do navegador e se outro programa está usando a câmera.'
+        : 'Captura de tela cancelada.');
+      refreshCell(clip);
+    } finally { m.starting = false; }
+  }
+
+  function stopStream(clipId) {
+    const m = rt.media[clipId];
+    if (m && m.stream) { m.stream.getTracks().forEach((t) => t.stop()); m.stream = null; m.ready = false; }
+  }
+
+  function startClipMedia(clip, m, restart) {
+    if (clip.type === 'video' && m.el) {
+      if (restart) { try { m.el.currentTime = 0; } catch (_) {} }
+      m.el.loop = clip.loop;
+      m.el.playbackRate = clip.speed || 1;
+      m.el.muted = !!clip.muted;
+      m.el.play().catch(() => {});
+    } else if (clip.type === 'camera' || clip.type === 'screen') {
+      startStream(clip, m);
+    }
+  }
+
+  function stopClipMedia(clipId) {
+    const clip = P.clips[clipId], m = rt.media[clipId];
+    if (!clip || !m || !m.el) return;
+    if (clip.type === 'video' && !isLive(clipId)) m.el.pause();
+  }
+
+  function disposeMedia(clipId) {
+    const m = rt.media[clipId];
+    if (!m) return;
+    if (m.stream) m.stream.getTracks().forEach((t) => t.stop());
+    if (m.el && m.el.tagName === 'VIDEO') {
+      try { m.el.pause(); m.el.srcObject = null; m.el.removeAttribute('src'); m.el.load(); } catch (_) {}
+    }
+    if (m.url) URL.revokeObjectURL(m.url);
+    delete rt.media[clipId];
+  }
+
+  // =====================================================================
+  // Disparo de clipes / camadas
+  // =====================================================================
+  function triggerClip(layer, clipId, opts = {}) {
+    const clip = P.clips[clipId];
+    if (!clip || !layer) return;
+    const L = layerRt(layer.id);
+    const m = ensureMedia(clip);
+    if (L.current && L.current.clipId === clipId) {
+      // já está no ar: só reconecta câmera/tela se caiu
+      if ((clip.type === 'camera' || clip.type === 'screen') && !(m.stream && m.stream.active)) startStream(clip, m);
+      if (clip.type === 'text') rt.liveText = clipId;
+      return;
+    }
+    if (clip.type === 'text') {
+      if (!opts.keepSlide) clip.slide = 0;
+      delete rt.textAnim[clipId];
+      rt.liveText = clipId;
+    }
+    if (L.prev) { const old = L.prev.clipId; L.prev = null; stopClipMedia(old); }
+    L.prev = L.current;
+    L.current = { clipId };
+    L.t0 = performance.now();
+    startClipMedia(clip, m, true);
+    onLiveChanged();
+  }
+
+  function clearLayer(layer) {
+    const L = layerRt(layer.id);
+    if (!L.current) return;
+    if (L.prev) { const old = L.prev.clipId; L.prev = null; stopClipMedia(old); }
+    L.prev = L.current;
+    L.current = null;
+    L.t0 = performance.now();
+    onLiveChanged();
+  }
+
+  function triggerColumn(col) {
+    if (col < 0 || col >= P.columns) return;
+    for (const layer of P.layers) { const id = layer.clips[col]; if (id) triggerClip(layer, id); }
+  }
+
+  function clearAll() { P.layers.forEach(clearLayer); }
+
+  function setBlackout(on) {
+    rt.blackout = on;
+    $('#btnBlackout').classList.toggle('active', on);
+  }
+
+  // =====================================================================
+  // Texto / letras
+  // =====================================================================
+  const slidesCache = new Map();
+  function getSlides(clip) {
+    const c = slidesCache.get(clip.id);
+    if (c && c.text === clip.text) return c.slides;
+    const slides = String(clip.text || '').replace(/\r/g, '').split(/\n[ \t]*\n/).map((s) => s.trim()).filter(Boolean);
+    slidesCache.set(clip.id, { text: clip.text, slides });
+    return slides;
+  }
+
+  function liveTextClip() {
+    if (rt.liveText && P.clips[rt.liveText] && isLive(rt.liveText)) return P.clips[rt.liveText];
+    for (let i = P.layers.length - 1; i >= 0; i--) {
+      const cur = layerRt(P.layers[i].id).current;
+      const c = cur && P.clips[cur.clipId];
+      if (c && c.type === 'text') return c;
+    }
+    return null;
+  }
+  function keyTextClip() {
+    const live = liveTextClip();
+    if (live) return live;
+    const sel = P.clips[ui.selClip];
+    return sel && sel.type === 'text' ? sel : null;
+  }
+
+  function setSlide(clip, idx) {
+    const n = getSlides(clip).length;
+    idx = clamp(idx, 0, Math.max(0, n - 1));
+    if (idx === clip.slide) return;
+    if (isLive(clip.id) && (clip.style.transition || 0) > 0) rt.textAnim[clip.id] = { from: clip.slide, t0: performance.now() };
+    else delete rt.textAnim[clip.id];
+    clip.slide = idx;
+    scheduleSave();
+    updateSlidesActive(true);
+  }
+
+  function stepSlide(dir) {
+    const clip = keyTextClip();
+    if (!clip) { toast('Nenhuma letra no ar. Clique num clipe de texto primeiro.'); return; }
+    setSlide(clip, (clip.slide || 0) + dir);
+  }
+
+  function clearLyrics() {
+    const clip = liveTextClip();
+    if (!clip) return;
+    for (const l of P.layers) { const r = layerRt(l.id); if (r.current && r.current.clipId === clip.id) clearLayer(l); }
+  }
+
+  const layoutCache = new Map();
+  function layoutText(c, clip, text, W, H) {
+    const s = clip.style;
+    const key = `${W}x${H}|${JSON.stringify(s)}|${text}`;
+    const hit = layoutCache.get(key);
+    if (hit) return hit;
+    const k = H / 1080;
+    const maxW = Math.max(50, W - 2 * s.margin * k);
+    const maxH = Math.max(50, H - 2 * s.margin * k);
+    const txt = s.uppercase ? text.toLocaleUpperCase('pt-BR') : text;
+    let size = s.size * k;
+    let out = null;
+    for (let i = 0; i < 40; i++) {
+      const font = `${s.italic ? 'italic ' : ''}${s.bold ? 'bold ' : ''}${Math.round(size)}px "${s.font}", Arial, sans-serif`;
+      c.font = font;
+      const lines = [];
+      let widest = 0;
+      for (const para of txt.split('\n')) {
+        const words = para.split(/\s+/).filter(Boolean);
+        if (!words.length) { lines.push(''); continue; }
+        let line = words[0];
+        for (let w = 1; w < words.length; w++) {
+          const test = line + ' ' + words[w];
+          if (c.measureText(test).width <= maxW) line = test;
+          else { lines.push(line); line = words[w]; }
+        }
+        lines.push(line);
+      }
+      for (const ln of lines) widest = Math.max(widest, c.measureText(ln).width);
+      const lineH = size * s.lineHeight;
+      out = { font, lines, lineH, blockW: widest, blockH: lines.length * lineH, size };
+      if ((out.blockH <= maxH && widest <= maxW) || size <= 14 * k) break;
+      size *= 0.93;
+    }
+    if (layoutCache.size > 300) layoutCache.clear();
+    layoutCache.set(key, out);
+    return out;
+  }
+
+  function hexToRgba(hex, a) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    const n = m ? parseInt(m[1], 16) : 0;
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+  }
+
+  function drawSlide(c, clip, idx, alpha, W, H) {
+    const slides = getSlides(clip);
+    const text = slides[idx];
+    if (!text || alpha <= 0.001) return;
+    const s = clip.style, k = H / 1080;
+    const lay = layoutText(c, clip, text, W, H);
+    const margin = s.margin * k;
+    const y0 = s.valign === 'top' ? margin : s.valign === 'bottom' ? H - margin - lay.blockH : (H - lay.blockH) / 2;
+    const x = s.align === 'left' ? margin : s.align === 'right' ? W - margin : W / 2;
+
+    c.save();
+    c.globalAlpha = alpha;
+    if (s.box !== 'none') {
+      const pad = lay.size * 0.45;
+      c.fillStyle = hexToRgba(s.boxColor, s.boxOpacity);
+      if (s.box === 'band') c.fillRect(0, y0 - pad, W, lay.blockH + pad * 2);
+      else {
+        const bx = s.align === 'left' ? x - pad : s.align === 'right' ? x - lay.blockW - pad : x - lay.blockW / 2 - pad;
+        c.fillRect(bx, y0 - pad, lay.blockW + pad * 2, lay.blockH + pad * 2);
+      }
+    }
+    c.font = lay.font;
+    c.textAlign = s.align;
+    c.textBaseline = 'middle';
+    c.lineJoin = 'round';
+    c.miterLimit = 2;
+    const setShadow = (on) => {
+      c.shadowColor = on ? 'rgba(0,0,0,0.85)' : 'transparent';
+      c.shadowBlur = on ? 14 * k : 0;
+      c.shadowOffsetY = on ? 4 * k : 0;
+    };
+    lay.lines.forEach((ln, i) => {
+      const y = y0 + lay.lineH * (i + 0.5);
+      if (s.outline > 0) {
+        setShadow(s.shadow);
+        c.strokeStyle = s.outlineColor;
+        c.lineWidth = s.outline * 2 * k;
+        c.strokeText(ln, x, y);
+        setShadow(false);
+      } else setShadow(s.shadow);
+      c.fillStyle = s.color;
+      c.fillText(ln, x, y);
+    });
+    c.restore();
+  }
+
+  function drawTextClip(c, clip, alpha, now, W, H) {
+    const idx = clip.slide || 0;
+    const anim = rt.textAnim[clip.id];
+    if (anim) {
+      const d = (clip.style.transition || 0) * 1000;
+      const p = d > 0 ? Math.min(1, (now - anim.t0) / d) : 1;
+      if (p < 1) {
+        drawSlide(c, clip, anim.from, alpha * (1 - p), W, H);
+        drawSlide(c, clip, idx, alpha * p, W, H);
+        return;
+      }
+      delete rt.textAnim[clip.id];
+    }
+    drawSlide(c, clip, idx, alpha, W, H);
+  }
+
+  // =====================================================================
+  // Renderização da composição
+  // =====================================================================
+  function isOpaque(clip) {
+    if (!clip) return false;
+    if (clip.type === 'color') return true;
+    if (clip.type === 'text') return false;
+    if (clip.fit === 'contain') return false;
+    if (clip.type === 'image') return /jpe?g/i.test(clip.mime || '');
+    return true;
+  }
+
+  function colorFill(c, clip, W, H) {
+    if (!clip.gradient) return clip.color;
+    let g;
+    if (clip.dir === 'radial') g = c.createRadialGradient(W / 2, H / 2, 0, W / 2, H / 2, Math.hypot(W, H) / 2);
+    else if (clip.dir === 'horizontal') g = c.createLinearGradient(0, 0, W, 0);
+    else if (clip.dir === 'diagonal') g = c.createLinearGradient(0, 0, W, H);
+    else g = c.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, clip.color);
+    g.addColorStop(1, clip.color2);
+    return g;
+  }
+
+  function drawFit(c, el, sw, sh, fit, W, H) {
+    if (fit === 'stretch') { c.drawImage(el, 0, 0, W, H); return; }
+    const s = fit === 'contain' ? Math.min(W / sw, H / sh) : Math.max(W / sw, H / sh);
+    const dw = sw * s, dh = sh * s;
+    c.drawImage(el, (W - dw) / 2, (H - dh) / 2, dw, dh);
+  }
+
+  // Desenha um clipe no canvas da camada. gain = volume final do áudio.
+  function drawClip(c, clip, alpha, now, gain, W, H) {
+    if (!clip) return false;
+    const m = rt.media[clip.id];
+    if (clip.type === 'video' && m && m.el) {
+      m.el.muted = !!clip.muted;
+      m.el.volume = clamp((clip.volume == null ? 1 : clip.volume) * gain, 0, 1);
+    }
+    if (alpha <= 0.001) return false;
+    c.globalAlpha = alpha;
+    switch (clip.type) {
+      case 'color':
+        c.fillStyle = colorFill(c, clip, W, H);
+        c.fillRect(0, 0, W, H);
+        return true;
+      case 'text':
+        drawTextClip(c, clip, alpha, now, W, H);
+        return true;
+      default: {
+        if (!m || !m.el || !m.ready) return false;
+        const el = m.el;
+        if (el.tagName === 'VIDEO' && el.readyState < 2) return false;
+        const sw = el.videoWidth || el.naturalWidth, sh = el.videoHeight || el.naturalHeight;
+        if (!sw || !sh) return false;
+        if (clip.mirror) {
+          c.save(); c.translate(W, 0); c.scale(-1, 1);
+          drawFit(c, el, sw, sh, clip.fit, W, H);
+          c.restore();
+        } else drawFit(c, el, sw, sh, clip.fit, W, H);
+        return true;
+      }
+    }
+  }
+
+  function renderLayer(layer, now, masterEff, W, H) {
+    const L = layerRt(layer.id);
+    if (!L.current && !L.prev) return null;
+    const fade = Math.max(0, layer.fade || 0) * 1000;
+    const p = fade > 0 ? Math.min(1, (now - L.t0) / fade) : 1;
+    if (p >= 1 && L.prev) { const old = L.prev.clipId; L.prev = null; stopClipMedia(old); }
+
+    if (!L.canvas) { L.canvas = document.createElement('canvas'); L.ctx = L.canvas.getContext('2d'); }
+    if (L.canvas.width !== W || L.canvas.height !== H) { L.canvas.width = W; L.canvas.height = H; }
+    const c = L.ctx;
+    c.globalAlpha = 1;
+    c.globalCompositeOperation = 'source-over';
+    c.clearRect(0, 0, W, H);
+
+    const layerGain = layer.bypass ? 0 : layer.opacity * masterEff;
+    const cur = L.current && P.clips[L.current.clipId];
+    let drew = false;
+    if (L.prev) {
+      const a = cur && isOpaque(cur) ? 1 : 1 - p;
+      drew = drawClip(c, P.clips[L.prev.clipId], a, now, (1 - p) * layerGain, W, H) || drew;
+    }
+    if (cur) drew = drawClip(c, cur, p, now, p * layerGain, W, H) || drew;
+    c.globalAlpha = 1;
+    return drew ? L.canvas : null;
+  }
+
+  function fxFilter(fx) {
+    const parts = [];
+    if (fx.brightness !== 100) parts.push(`brightness(${fx.brightness}%)`);
+    if (fx.contrast !== 100) parts.push(`contrast(${fx.contrast}%)`);
+    if (fx.saturate !== 100) parts.push(`saturate(${fx.saturate}%)`);
+    if (fx.hue !== 0) parts.push(`hue-rotate(${fx.hue}deg)`);
+    if (fx.blur > 0) parts.push(`blur(${(fx.blur * P.height / 1080).toFixed(1)}px)`);
+    return parts.length ? parts.join(' ') : 'none';
+  }
+
+  function renderComposition(now) {
+    const W = P.width, H = P.height;
+    if (comp.width !== W || comp.height !== H) { comp.width = W; comp.height = H; }
+    const dt = rt.lastNow ? Math.min(100, now - rt.lastNow) : 16;
+    rt.lastNow = now;
+
+    // fade do blackout
+    const target = rt.blackout ? 1 : 0;
+    const step = dt / Math.max(1, (P.masterFade || 0.01) * 1000);
+    rt.blackLevel = target > rt.blackLevel ? Math.min(target, rt.blackLevel + step) : Math.max(target, rt.blackLevel - step);
+    const masterEff = P.master * (1 - rt.blackLevel);
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.filter = 'none';
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
+
+    for (const layer of P.layers) { // de baixo para cima
+      const lc = renderLayer(layer, now, masterEff, W, H);
+      if (!lc || layer.bypass || layer.opacity <= 0) continue;
+      ctx.globalAlpha = layer.opacity;
+      ctx.globalCompositeOperation = layer.blend;
+      ctx.filter = fxFilter(layer.fx);
+      const z = (layer.fx.zoom || 100) / 100;
+      if (z !== 1) {
+        const dw = W * z, dh = H * z;
+        ctx.drawImage(lc, (W - dw) / 2, (H - dh) / 2, dw, dh);
+      } else ctx.drawImage(lc, 0, 0);
+    }
+    ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'source-over';
+    if (masterEff < 1) {
+      ctx.globalAlpha = 1 - masterEff;
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.globalAlpha = 1;
+
+    // copia para a janela do projetor
+    if (rt.outWin && !rt.outWin.closed && rt.outCtx) {
+      const oc = rt.outCanvas;
+      if (oc.width !== W || oc.height !== H) { oc.width = W; oc.height = H; }
+      rt.outCtx.drawImage(comp, 0, 0);
+    }
+  }
+
+  // Loop de renderização. Quando o projetor está aberto, usamos o requestAnimationFrame
+  // da janela do projetor (ela está sempre visível), para não congelar se o painel
+  // de controle for minimizado ou ficar em segundo plano.
+  let loopToken = 0, lastFrameT = 0, fpsCount = 0, fpsT = 0;
+  function schedule() {
+    const tok = ++loopToken;
+    let w = window;
+    try { if (rt.outWin && !rt.outWin.closed) w = rt.outWin; } catch (_) { w = window; }
+    w.requestAnimationFrame(() => { if (tok === loopToken) frame(); });
+  }
+  function frame() {
+    const now = performance.now();
+    lastFrameT = now;
+    try {
+      renderComposition(now);
+      updateProgress();
+    } catch (e) { console.error(e); }
+    fpsCount++;
+    if (now - fpsT > 1000) {
+      $('#fps').textContent = `${P.width}×${P.height} · ${Math.round(fpsCount * 1000 / (now - fpsT))} fps`;
+      fpsCount = 0; fpsT = now;
+    }
+    schedule();
+  }
+  setInterval(() => { if (performance.now() - lastFrameT > 300) schedule(); }, 300);
+
+  // =====================================================================
+  // Janela do projetor
+  // =====================================================================
+  const OUT_NAME = 'cdl_projetor';
+  function openOutput() {
+    if (rt.outWin && !rt.outWin.closed) { rt.outWin.focus(); return rt.outWin; }
+    const win = window.open('', OUT_NAME, 'popup=yes,width=960,height=540');
+    if (!win) { toast('O navegador bloqueou a janela do projetor. Permita pop-ups para esta página e tente de novo.', 6000); return null; }
+    setupOutputWindow(win);
+    keepAwake();
+    return win;
+  }
+
+  function setupOutputWindow(win) {
+    const d = win.document;
+    d.open();
+    d.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Projetor — Cara de Leão</title>
+<style>
+html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:none}
+canvas{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;display:block;background:#000}
+#hint{position:fixed;left:50%;top:20px;transform:translateX(-50%);background:rgba(0,0,0,.75);color:#fff;
+font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:1px solid #444;transition:opacity .6s;cursor:default}
+</style></head><body><canvas id="out"></canvas>
+<div id="hint">Arraste esta janela para o projetor e dê <b>dois cliques</b> (ou tecle <b>F</b>) para tela cheia</div></body></html>`);
+    d.close();
+    const cv = d.getElementById('out');
+    cv.width = P.width; cv.height = P.height;
+    rt.outWin = win;
+    rt.outCanvas = cv;
+    rt.outCtx = cv.getContext('2d', { alpha: false });
+    const hint = d.getElementById('hint');
+    const hideHint = () => { hint.style.opacity = '0'; };
+    setTimeout(hideHint, 7000);
+    const toggleFs = () => {
+      if (d.fullscreenElement) d.exitFullscreen().catch(() => {});
+      else d.documentElement.requestFullscreen().then(hideHint).catch(() => {});
+    };
+    d.addEventListener('dblclick', toggleFs);
+    win.addEventListener('keydown', (e) => {
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); toggleFs(); return; }
+      handleKey(e);
+    });
+    win.addEventListener('pagehide', () => { if (rt.outWin === win) { rt.outWin = null; rt.outCtx = null; updateOutStatus(); } });
+    updateOutStatus();
+    schedule();
+  }
+
+  async function moveOutputToSecondScreen() {
+    const win = openOutput();
+    if (!win) return;
+    if (!('getScreenDetails' in window)) {
+      toast('Arraste a janela do projetor para a segunda tela e dê dois cliques nela para tela cheia.', 6000);
+      return;
+    }
+    try {
+      const sd = await window.getScreenDetails();
+      const cur = sd.currentScreen;
+      const other = sd.screens.find((s) => s.left !== cur.left || s.top !== cur.top);
+      if (!other) { toast('Só uma tela foi detectada. No Windows, aperte Win+P e escolha "Estender".', 7000); return; }
+      win.moveTo(other.availLeft, other.availTop);
+      win.resizeTo(other.availWidth, other.availHeight);
+      win.document.documentElement.requestFullscreen({ screen: other }).catch(() => {});
+      toast('Projetor enviado para a 2ª tela. Se não ficar em tela cheia, dê dois cliques na imagem dele.', 6000);
+    } catch (e) {
+      toast('Sem permissão para mover janelas. Arraste a janela do projetor manualmente e dê dois cliques nela.', 7000);
+    }
+  }
+
+  function updateOutStatus() {
+    const on = !!(rt.outWin && !rt.outWin.closed);
+    const s = $('#outStatus');
+    s.textContent = on ? '● Projetor conectado' : 'Projetor fechado';
+    s.classList.toggle('on', on);
+    s.classList.toggle('off', !on);
+    $('#btnOutput').textContent = on ? '📽 Mostrar projetor' : '📽 Abrir projetor';
+  }
+  setInterval(() => {
+    if (rt.outWin && rt.outWin.closed) { rt.outWin = null; rt.outCtx = null; }
+    updateOutStatus();
+  }, 1000);
+
+  let wakeLock = null;
+  async function keepAwake() {
+    try {
+      if ('wakeLock' in navigator && !wakeLock && !document.hidden) {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => { wakeLock = null; });
+      }
+    } catch (_) { /* sem suporte */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) keepAwake(); });
+
+  // =====================================================================
+  // Grade de clipes (deck)
+  // =====================================================================
+  function colorCss(clip) {
+    if (!clip.gradient) return clip.color;
+    if (clip.dir === 'radial') return `radial-gradient(circle, ${clip.color}, ${clip.color2})`;
+    const ang = clip.dir === 'horizontal' ? '90deg' : clip.dir === 'diagonal' ? '135deg' : '180deg';
+    return `linear-gradient(${ang}, ${clip.color}, ${clip.color2})`;
+  }
+
+  function cellInner(clip) {
+    const m = rt.media[clip.id];
+    let thumb;
+    if (m && m.error) thumb = `<div class="ithumb" title="${esc(m.error)}">⚠️</div>`;
+    else if (clip.type === 'text') thumb = `<div class="tthumb">${esc(getSlides(clip)[0] || '(vazio)')}</div>`;
+    else if (clip.type === 'color') thumb = `<div class="cthumb" style="background:${esc(colorCss(clip))}"></div>`;
+    else if (clip.type === 'camera') thumb = `<div class="ithumb">📷</div>`;
+    else if (clip.type === 'screen') thumb = `<div class="ithumb">🖥</div>`;
+    else if (clip.thumb) thumb = `<img src="${clip.thumb}" draggable="false" alt="">`;
+    else thumb = `<div class="ithumb">⏳</div>`;
+    const extra = clip.type === 'video' && clip.muted ? ' 🔇' : '';
+    return `<div class="thumb">${thumb}<span class="badge">${BADGE[clip.type]}${extra}</span>` +
+      `<button class="edit" data-act="edit" title="Editar sem colocar no ar">✎</button>` +
+      `<span class="live-tag">NO AR</span><div class="prog"><i></i></div></div>` +
+      `<div class="cname" title="${esc(clip.name)}">${esc(clip.name)}</div>`;
+  }
+
+  function renderDeck() {
+    const deck = $('#deck');
+    deck.style.gridTemplateColumns = `200px repeat(${P.columns}, var(--cell-w)) 30px`;
+    let html = `<div class="corner"><span>Camadas</span><button class="mini" data-act="addlayer" title="Adicionar camada">+ camada</button></div>`;
+    for (let c = 0; c < P.columns; c++) {
+      html += `<button class="col-trigger" data-col="${c}" title="Colocar no ar a coluna ${c + 1} inteira${c < 9 ? ` (tecla ${c + 1})` : ''}">▶ ${c + 1}</button>`;
+    }
+    html += `<button class="col-add" data-act="addcol" title="Adicionar coluna">+</button>`;
+    for (let i = P.layers.length - 1; i >= 0; i--) {
+      const L = P.layers[i];
+      html += `<div class="layer-head${L.bypass ? ' bypassed' : ''}" data-layer="${L.id}">
+        <div class="lh-row"><span class="lh-num" title="${i === P.layers.length - 1 ? 'Camada de cima' : i === 0 ? 'Camada de baixo' : ''}">${i + 1}</span>
+          <span class="lh-name" title="Duplo clique para renomear">${esc(L.name)}</span>
+          <button class="ico" data-act="bypass" title="${L.bypass ? 'Mostrar camada' : 'Ocultar camada'}">${L.bypass ? '🚫' : '👁'}</button>
+          <button class="ico danger" data-act="clear" title="Tirar esta camada do ar">✕</button></div>
+        <input type="range" class="lh-opacity" min="0" max="1" step="0.01" value="${L.opacity}" title="Opacidade (duplo clique = 100%)">
+        <div class="lh-row small">
+          <select class="lh-blend" title="Modo de mistura">${BLENDS.map(([v, t]) => `<option value="${v}"${v === L.blend ? ' selected' : ''}>${t}</option>`).join('')}</select>
+          <label title="Tempo da transição (segundos)">⟷<input type="number" class="lh-fade" min="0" max="10" step="0.1" value="${L.fade}">s</label>
+        </div></div>`;
+      for (let c = 0; c < P.columns; c++) {
+        const id = L.clips[c];
+        const clip = id && P.clips[id];
+        if (clip) html += `<div class="cell" draggable="true" data-layer="${L.id}" data-col="${c}" data-clip="${clip.id}">${cellInner(clip)}</div>`;
+        else html += `<div class="cell empty" data-layer="${L.id}" data-col="${c}" title="Adicionar clipe (ou arraste um arquivo aqui)"><span>+</span></div>`;
+      }
+      html += '<div></div>';
+    }
+    deck.innerHTML = html;
+    cellEls.clear(); progEls.clear();
+    $$('.cell[data-clip]', deck).forEach((e) => { cellEls.set(e.dataset.clip, e); progEls.set(e.dataset.clip, e.querySelector('.prog i')); });
+    onLiveChanged();
+    markSelected();
+  }
+
+  function refreshCell(clip) {
+    const e = cellEls.get(clip.id);
+    if (!e) return;
+    e.innerHTML = cellInner(clip);
+    progEls.set(clip.id, e.querySelector('.prog i'));
+  }
+
+  function onLiveChanged() {
+    for (const [id, e] of cellEls) {
+      const live = isLive(id);
+      e.classList.toggle('live', live);
+      if (!live) { const b = progEls.get(id); if (b) b.style.width = '0'; }
+    }
+    for (const e of $$('.layer-head')) {
+      const r = rt.layers[e.dataset.layer];
+      e.classList.toggle('onair', !!(r && r.current));
+    }
+    updateSlidesActive(false);
+  }
+
+  function markSelected() {
+    for (const [id, e] of cellEls) e.classList.toggle('selected', id === ui.selClip);
+    for (const e of $$('.layer-head')) e.classList.toggle('selected', !ui.selClip && e.dataset.layer === ui.selLayer);
+  }
+
+  function updateProgress() {
+    for (const L of P.layers) {
+      const cur = rt.layers[L.id] && rt.layers[L.id].current;
+      if (!cur) continue;
+      const clip = P.clips[cur.clipId];
+      if (!clip || clip.type !== 'video') continue;
+      const m = rt.media[clip.id], bar = progEls.get(clip.id);
+      if (m && m.el && bar && m.el.duration) bar.style.width = (m.el.currentTime / m.el.duration * 100).toFixed(1) + '%';
+    }
+  }
+
+  function select(clipId, layerId) {
+    ui.selClip = clipId;
+    ui.selLayer = layerId;
+    markSelected();
+    renderInspector();
+    renderSlides();
+  }
+
+  function placeClip(layer, col, clip) {
+    P.clips[clip.id] = clip;
+    layer.clips[col] = clip.id;
+    renderDeck();
+    select(clip.id, layer.id);
+    scheduleSave();
+  }
+
+  function addColumns(n) {
+    P.columns += n;
+    for (const l of P.layers) for (let i = 0; i < n; i++) l.clips.push(null);
+  }
+
+  function addLayer() {
+    P.layers.push(newLayer('Camada ' + (P.layers.length + 1), P.columns));
+    renderDeck();
+    scheduleSave();
+  }
+
+  function removeLayer(layer) {
+    if (P.layers.length <= 1) { toast('O projeto precisa de pelo menos uma camada.'); return; }
+    if (!confirm(`Remover a camada "${layer.name}" e todos os clipes dela?`)) return;
+    for (const id of layer.clips) if (id) removeClipData(id);
+    delete rt.layers[layer.id];
+    P.layers = P.layers.filter((l) => l !== layer);
+    if (ui.selLayer === layer.id) { ui.selLayer = null; ui.selClip = null; }
+    renderAll();
+    scheduleSave();
+  }
+
+  function moveLayer(layer, dir) {
+    const i = P.layers.indexOf(layer), j = i + dir;
+    if (j < 0 || j >= P.layers.length) return;
+    [P.layers[i], P.layers[j]] = [P.layers[j], P.layers[i]];
+    renderDeck();
+    scheduleSave();
+  }
+
+  function removeClipData(id) {
+    const clip = P.clips[id];
+    if (!clip) return;
+    for (const L of P.layers) {
+      const i = L.clips.indexOf(id);
+      if (i >= 0) L.clips[i] = null;
+      const r = rt.layers[L.id];
+      if (r && r.current && r.current.clipId === id) r.current = null;
+      if (r && r.prev && r.prev.clipId === id) r.prev = null;
+    }
+    disposeMedia(id);
+    delete P.clips[id];
+    delete rt.textAnim[id];
+    slidesCache.delete(id);
+    if (clip.mediaKey && !Object.values(P.clips).some((c) => c.mediaKey === clip.mediaKey)) {
+      pendingBlobs.delete(clip.mediaKey);
+      DB.del('media', clip.mediaKey).catch(() => {});
+    }
+    if (ui.selClip === id) ui.selClip = null;
+  }
+
+  function removeClip(id) {
+    const clip = P.clips[id];
+    if (!clip) return;
+    if (!confirm(`Remover o clipe "${clip.name}"?`)) return;
+    removeClipData(id);
+    renderAll();
+    scheduleSave();
+  }
+
+  function duplicateClip(id) {
+    const clip = P.clips[id];
+    const layer = layerOfClip(id);
+    if (!clip || !layer) return;
+    const copy = JSON.parse(JSON.stringify(clip));
+    copy.id = uid();
+    copy.name = clip.name + ' (cópia)';
+    let col = layer.clips.indexOf(id) + 1;
+    while (col < P.columns && layer.clips[col]) col++;
+    if (col >= P.columns) addColumns(col - P.columns + 1);
+    if (copy.type === 'video' || copy.type === 'image') ensureMedia(copy);
+    placeClip(layer, col, copy);
+  }
+
+  function moveClip(srcLayer, srcCol, dstLayer, dstCol) {
+    if (srcLayer === dstLayer && srcCol === dstCol) return;
+    const a = srcLayer.clips[srcCol], b = dstLayer.clips[dstCol];
+    srcLayer.clips[srcCol] = b;
+    dstLayer.clips[dstCol] = a;
+    renderDeck();
+    scheduleSave();
+  }
+
+  function guessType(file) {
+    if (file.type.startsWith('video/')) return 'video';
+    if (file.type.startsWith('image/')) return 'image';
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (['mp4', 'm4v', 'webm', 'mov', 'mkv', 'ogv'].includes(ext)) return 'video';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'avif'].includes(ext)) return 'image';
+    return null;
+  }
+
+  function importFiles(files, layer, col) {
+    let c = col, added = 0, last = null;
+    for (const f of files) {
+      const type = guessType(f);
+      if (!type) { toast(`"${f.name}" não é vídeo nem imagem.`); continue; }
+      while (c < P.columns && layer.clips[c]) c++;
+      if (c >= P.columns) addColumns(c - P.columns + 1);
+      const key = uid();
+      pendingBlobs.set(key, f);
+      DB.put('media', key, f).catch(() => toast(`Não foi possível guardar "${f.name}" no navegador (sem espaço?). Ele funciona até recarregar a página.`, 6000));
+      const isJpeg = /jpe?g/i.test(f.type) || /\.jpe?g$/i.test(f.name);
+      const clip = {
+        id: uid(), type, name: f.name.replace(/\.[^.]+$/, ''), mediaKey: key, mime: f.type,
+        fit: type === 'image' && !isJpeg ? 'contain' : 'cover',
+        loop: true, speed: 1, muted: false, volume: 1, thumb: null,
+      };
+      P.clips[clip.id] = clip;
+      layer.clips[c] = clip.id;
+      ensureMedia(clip);
+      last = clip; added++; c++;
+    }
+    if (!added) return;
+    renderDeck();
+    select(last.id, layer.id);
+    scheduleSave();
+  }
+
+  // ---------- eventos do deck ----------
+  const deck = $('#deck');
+  deck.addEventListener('click', (e) => {
+    const cell = e.target.closest('.cell');
+    if (cell) {
+      const layer = layerById(cell.dataset.layer);
+      const col = +cell.dataset.col;
+      const clipId = layer && layer.clips[col];
+      if (!clipId) { openAddMenu(cell, layer, col); return; }
+      if (e.target.closest('[data-act=edit]')) { select(clipId, layer.id); return; }
+      triggerClip(layer, clipId);
+      select(clipId, layer.id);
+      return;
+    }
+    const colBtn = e.target.closest('.col-trigger');
+    if (colBtn) { triggerColumn(+colBtn.dataset.col); return; }
+    const act = e.target.closest('[data-act]');
+    if (act && act.dataset.act === 'addcol') { addColumns(1); renderDeck(); scheduleSave(); return; }
+    if (act && act.dataset.act === 'addlayer') { addLayer(); return; }
+    const lh = e.target.closest('.layer-head');
+    if (lh) {
+      const layer = layerById(lh.dataset.layer);
+      if (act && act.dataset.act === 'clear') { clearLayer(layer); return; }
+      if (act && act.dataset.act === 'bypass') { layer.bypass = !layer.bypass; renderDeck(); scheduleSave(); return; }
+      if (!e.target.closest('input,select,label')) select(null, layer.id);
+    }
+  });
+  deck.addEventListener('contextmenu', (e) => {
+    const cell = e.target.closest('.cell[data-clip]');
+    if (!cell) return;
+    e.preventDefault();
+    select(cell.dataset.clip, cell.dataset.layer);
+  });
+  deck.addEventListener('input', (e) => {
+    const lh = e.target.closest('.layer-head');
+    if (!lh) return;
+    const layer = layerById(lh.dataset.layer);
+    if (e.target.classList.contains('lh-opacity')) layer.opacity = parseFloat(e.target.value);
+    else if (e.target.classList.contains('lh-fade')) layer.fade = Math.max(0, parseFloat(e.target.value) || 0);
+    scheduleSave();
+  });
+  deck.addEventListener('change', (e) => {
+    const lh = e.target.closest('.layer-head');
+    if (!lh) return;
+    if (e.target.classList.contains('lh-blend')) { layerById(lh.dataset.layer).blend = e.target.value; scheduleSave(); }
+  });
+  deck.addEventListener('dblclick', (e) => {
+    const lh = e.target.closest('.layer-head');
+    if (!lh) return;
+    const layer = layerById(lh.dataset.layer);
+    if (e.target.classList.contains('lh-opacity')) { layer.opacity = 1; e.target.value = 1; scheduleSave(); return; }
+    if (e.target.classList.contains('lh-name')) {
+      const name = prompt('Nome da camada:', layer.name);
+      if (name && name.trim()) { layer.name = name.trim(); renderDeck(); renderInspector(); scheduleSave(); }
+    }
+  });
+
+  // arrastar e soltar
+  const CELL_MIME = 'application/x-cdl-cell';
+  deck.addEventListener('dragstart', (e) => {
+    const cell = e.target.closest('.cell[data-clip]');
+    if (!cell) return;
+    e.dataTransfer.setData(CELL_MIME, `${cell.dataset.layer}|${cell.dataset.col}`);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  deck.addEventListener('dragover', (e) => {
+    const cell = e.target.closest('.cell');
+    if (!cell) return;
+    e.preventDefault();
+    $$('.cell.drop', deck).forEach((x) => x !== cell && x.classList.remove('drop'));
+    cell.classList.add('drop');
+  });
+  deck.addEventListener('dragleave', (e) => {
+    const cell = e.target.closest('.cell');
+    if (cell && !cell.contains(e.relatedTarget)) cell.classList.remove('drop');
+  });
+  deck.addEventListener('drop', (e) => {
+    const cell = e.target.closest('.cell');
+    $$('.cell.drop', deck).forEach((x) => x.classList.remove('drop'));
+    if (!cell) return;
+    e.preventDefault();
+    const layer = layerById(cell.dataset.layer), col = +cell.dataset.col;
+    if (e.dataTransfer.files && e.dataTransfer.files.length) { importFiles(Array.from(e.dataTransfer.files), layer, col); return; }
+    const src = e.dataTransfer.getData(CELL_MIME);
+    if (src) {
+      const [lid, c] = src.split('|');
+      const sl = layerById(lid);
+      if (sl) moveClip(sl, +c, layer, col);
+    }
+  });
+  // evita que o navegador abra o arquivo se soltar fora das células
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => e.preventDefault());
+
+  // ---------- menu de adicionar ----------
+  const addMenu = $('#addMenu');
+  const mainMenu = $('#mainMenu');
+  function showPopover(menu, anchor) {
+    hidePopovers();
+    menu.classList.remove('hidden');
+    const r = anchor.getBoundingClientRect();
+    const mw = menu.offsetWidth, mh = menu.offsetHeight;
+    let x = r.left, y = r.bottom + 4;
+    if (x + mw > innerWidth - 8) x = innerWidth - mw - 8;
+    if (y + mh > innerHeight - 8) y = Math.max(8, r.top - mh - 4);
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+  }
+  function hidePopovers() { addMenu.classList.add('hidden'); mainMenu.classList.add('hidden'); }
+  function openAddMenu(cell, layer, col) {
+    ui.addTarget = { layerId: layer.id, col };
+    showPopover(addMenu, cell);
+  }
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('.popover') && !e.target.closest('#btnMenu') && !e.target.closest('.cell.empty')) hidePopovers();
+  });
+
+  addMenu.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-add]');
+    if (!b || !ui.addTarget) return;
+    hidePopovers();
+    const layer = layerById(ui.addTarget.layerId), col = ui.addTarget.col;
+    if (!layer) return;
+    switch (b.dataset.add) {
+      case 'file': $('#fileInput').click(); return;
+      case 'text': {
+        placeClip(layer, col, newTextClip('Nova letra', 'Primeira estrofe\nda música\n\nSegunda estrofe\nda música'));
+        setTimeout(() => { const ta = $('#inspector textarea'); if (ta) { ta.focus(); ta.select(); } }, 30);
+        return;
+      }
+      case 'color': placeClip(layer, col, newColorClip('Cor', '#1b3b8f', '#000000', true, 'vertical')); return;
+      case 'camera': placeClip(layer, col, { id: uid(), type: 'camera', name: 'Câmera', deviceId: '', fit: 'cover', mirror: false }); return;
+      case 'screen': placeClip(layer, col, { id: uid(), type: 'screen', name: 'Captura de tela', fit: 'contain' }); return;
+    }
+  });
+  $('#fileInput').addEventListener('change', (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length || !ui.addTarget) return;
+    const layer = layerById(ui.addTarget.layerId);
+    if (layer) importFiles(files, layer, ui.addTarget.col);
+  });
+
+  // =====================================================================
+  // Painel de slides (letras)
+  // =====================================================================
+  function slidesTarget() {
+    const sel = P.clips[ui.selClip];
+    if (sel && sel.type === 'text') return sel;
+    return liveTextClip();
+  }
+
+  function renderSlides() {
+    const panel = $('#slidesPanel');
+    const clip = slidesTarget();
+    ui.slidesClip = clip ? clip.id : null;
+    if (!clip) {
+      panel.innerHTML = `<div class="empty-hint">
+        <h3>Letras e versículos</h3>
+        Clique num clipe de <b>TEXTO</b> na grade para ver os slides aqui.<br>
+        Para criar um, clique numa célula vazia <b>+</b> e escolha <i>Texto / Letra de música</i>.
+        Cole a letra e deixe uma <b>linha em branco</b> entre as estrofes — cada bloco vira um slide.<br><br>
+        Durante o culto: <kbd>→</kbd> próximo slide · <kbd>←</kbd> anterior · <kbd>C</kbd> tira a letra · <kbd>B</kbd> tela preta.
+        Passadores de slide (clicker) também funcionam.
+      </div>`;
+      return;
+    }
+    const slides = getSlides(clip);
+    const layer = layerOfClip(clip.id);
+    panel.innerHTML = '';
+    const head = h('div', { class: 'sp-head' },
+      h('b', {}, clip.name),
+      h('span', { class: 'pill', id: 'spPill' }),
+      h('span', { class: 'muted' }, `${layer ? layer.name : ''} · ${slides.length} slide${slides.length === 1 ? '' : 's'}`),
+      h('div', { class: 'spacer' }),
+      h('button', { class: 'btn small', title: 'Slide anterior (←)', onclick: () => setSlide(clip, clip.slide - 1) }, '◀ Anterior'),
+      h('button', { class: 'btn small', title: 'Próximo slide (→)', onclick: () => setSlide(clip, clip.slide + 1) }, 'Próximo ▶'),
+      h('button', {
+        class: 'btn small', id: 'spLive',
+        onclick: () => {
+          const l = layerOfClip(clip.id);
+          if (!l) return;
+          if (isLive(clip.id)) clearLayer(l); else triggerClip(l, clip.id, { keepSlide: true });
+        },
+      }));
+    const grid = h('div', { class: 'slides' });
+    if (!slides.length) grid.append(h('div', { class: 'muted' }, 'Sem texto. Digite a letra no painel à direita.'));
+    slides.forEach((s, i) => {
+      grid.append(h('div', {
+        class: 'slide', 'data-i': i, title: 'Clique para mostrar este slide',
+        onclick: () => {
+          setSlide(clip, i);
+          const l = layerOfClip(clip.id);
+          if (l && !isLive(clip.id)) triggerClip(l, clip.id, { keepSlide: true });
+        },
+      }, h('span', { class: 'n' }, String(i + 1)), clip.style.uppercase ? s.toLocaleUpperCase('pt-BR') : s));
+    });
+    panel.append(head, grid);
+    updateSlidesActive(false);
+  }
+
+  let slidesTimer;
+  function renderSlidesDebounced() { clearTimeout(slidesTimer); slidesTimer = setTimeout(renderSlides, 250); }
+
+  function updateSlidesActive(scroll) {
+    const target = slidesTarget();
+    if ((target ? target.id : null) !== ui.slidesClip) { renderSlides(); return; }
+    if (!target) return;
+    const live = isLive(target.id);
+    const pill = $('#spPill');
+    if (pill) { pill.textContent = live ? 'NO AR' : 'fora do ar'; pill.classList.toggle('live', live); }
+    const btn = $('#spLive');
+    if (btn) btn.textContent = live ? '✕ Tirar do ar' : '▶ Colocar no ar';
+    let cur = null;
+    for (const e of $$('#slidesPanel .slide')) {
+      const on = +e.dataset.i === target.slide;
+      e.classList.toggle('current', on);
+      e.classList.toggle('onair', on && live);
+      if (on) cur = e;
+    }
+    if (scroll && cur) cur.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // =====================================================================
+  // Inspetor (propriedades)
+  // =====================================================================
+  function field(label, control) { return h('label', { class: 'f' }, h('span', { class: 'fl' }, label), control, h('span')); }
+  function rangeF(label, obj, key, min, max, step, onCh, fmt) {
+    fmt = fmt || ((v) => String(v));
+    const out = h('span', { class: 'fv' }, fmt(obj[key]));
+    const inp = h('input', {
+      type: 'range', min, max, step, value: obj[key],
+      oninput: () => { obj[key] = parseFloat(inp.value); out.textContent = fmt(obj[key]); if (onCh) onCh(); scheduleSave(); },
+    });
+    return h('div', { class: 'f' }, h('span', { class: 'fl' }, label), inp, out);
+  }
+  function selectF(label, obj, key, opts, onCh) {
+    const s = h('select', { onchange: () => { obj[key] = s.value; if (onCh) onCh(); scheduleSave(); } },
+      opts.map(([v, t]) => h('option', { value: v }, t)));
+    s.value = obj[key];
+    return field(label, s);
+  }
+  function checkF(label, obj, key, onCh) {
+    const c = h('input', { type: 'checkbox', checked: !!obj[key], onchange: () => { obj[key] = c.checked; if (onCh) onCh(); scheduleSave(); } });
+    return h('label', { class: 'f chk' }, c, h('span', {}, label));
+  }
+  function colorInput(obj, key, onCh) {
+    const c = h('input', { type: 'color', value: obj[key], oninput: () => { obj[key] = c.value; if (onCh) onCh(); scheduleSave(); } });
+    return c;
+  }
+  function colorF(label, obj, key, onCh) { return field(label, colorInput(obj, key, onCh)); }
+  function textF(label, obj, key, onCh) {
+    const t = h('input', { type: 'text', value: obj[key] || '', oninput: () => { obj[key] = t.value; if (onCh) onCh(); scheduleSave(); } });
+    return field(label, t);
+  }
+
+  function renderInspector() {
+    const box = $('#inspector');
+    box.innerHTML = '';
+    const clip = P.clips[ui.selClip];
+    const layer = clip ? layerOfClip(clip.id) : layerById(ui.selLayer);
+    if (clip) box.append(clipSection(clip));
+    if (layer) box.append(layerSection(layer));
+    if (!clip && !layer) {
+      box.append(h('section', { class: 'insp-sec' },
+        h('h3', {}, 'Começando'),
+        h('ol', { class: 'hint', style: 'font-size:12px;line-height:1.7;padding-left:18px' },
+          h('li', {}, 'Clique em “Abrir projetor” e arraste a janela para o projetor/TV. Dois cliques = tela cheia.'),
+          h('li', {}, 'Arraste vídeos e imagens do computador para as células da grade.'),
+          h('li', {}, 'Clique num clipe para colocá-lo no ar. A camada de cima fica por cima.'),
+          h('li', {}, 'Crie clipes de texto para as letras e use as setas (ou o passador) para trocar os slides.'),
+          h('li', {}, 'Clique com o botão direito num clipe para editar sem colocar no ar.'))));
+    }
+  }
+
+  function clipSection(clip) {
+    const sec = h('section', { class: 'insp-sec' });
+    sec.append(h('h3', {}, TYPE_LABEL[clip.type] || 'Clipe'));
+    sec.append(textF('Nome', clip, 'name', () => { refreshCell(clip); if (clip.type === 'text') renderSlidesDebounced(); }));
+    const m = rt.media[clip.id];
+    const reCell = () => refreshCell(clip);
+
+    switch (clip.type) {
+      case 'video': {
+        sec.append(selectF('Ajuste', clip, 'fit', FIT_OPTS, () => { clip.thumb = null; makeThumb(clip); }));
+        sec.append(checkF('Repetir em loop', clip, 'loop', () => { if (m && m.el) m.el.loop = clip.loop; }));
+        sec.append(rangeF('Velocidade', clip, 'speed', 0.25, 2, 0.05, () => { if (m && m.el) m.el.playbackRate = clip.speed; }, (v) => v.toFixed(2) + '×'));
+        sec.append(checkF('Sem áudio (mudo)', clip, 'muted', () => { if (m && m.el) m.el.muted = clip.muted; reCell(); }));
+        sec.append(rangeF('Volume', clip, 'volume', 0, 1, 0.01, null, (v) => Math.round(v * 100) + '%'));
+        if (m && m.el && m.el.videoWidth) {
+          const d = m.el.duration || 0;
+          sec.append(h('div', { class: 'hint' }, `${m.el.videoWidth}×${m.el.videoHeight} · ${Math.floor(d / 60)}:${String(Math.floor(d % 60)).padStart(2, '0')}`));
+        }
+        sec.append(h('div', { class: 'hint' }, 'O áudio do vídeo sai pelo computador e acompanha as transições e a opacidade da camada.'));
+        break;
+      }
+      case 'image':
+        sec.append(selectF('Ajuste', clip, 'fit', FIT_OPTS, () => { clip.thumb = null; makeThumb(clip); }));
+        break;
+      case 'color':
+        sec.append(colorF('Cor', clip, 'color', reCell));
+        sec.append(checkF('Degradê', clip, 'gradient', () => { reCell(); renderInspector(); }));
+        if (clip.gradient) {
+          sec.append(colorF('Cor 2', clip, 'color2', reCell));
+          sec.append(selectF('Direção', clip, 'dir', [['vertical', 'Vertical'], ['horizontal', 'Horizontal'], ['diagonal', 'Diagonal'], ['radial', 'Radial (centro)']], reCell));
+        }
+        break;
+      case 'text':
+        textControls(sec, clip);
+        break;
+      case 'camera': {
+        const sel = h('select', {
+          onchange: () => {
+            clip.deviceId = sel.value; scheduleSave();
+            stopStream(clip.id);
+            if (isLive(clip.id)) startStream(clip, ensureMedia(clip));
+          },
+        }, h('option', { value: '' }, 'Padrão do sistema'));
+        const fill = async () => {
+          try {
+            const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+            sel.innerHTML = '';
+            sel.append(h('option', { value: '' }, 'Padrão do sistema'));
+            devs.forEach((d, i) => sel.append(h('option', { value: d.deviceId }, d.label || `Câmera ${i + 1}`)));
+            sel.value = clip.deviceId || '';
+          } catch (_) { /* sem permissão */ }
+        };
+        fill();
+        sec.append(field('Dispositivo', sel));
+        sec.append(h('div', { class: 'hint' }, 'Placas de captura HDMI/USB aparecem aqui como câmera. Se os nomes não aparecerem, coloque o clipe no ar uma vez e clique em “Atualizar lista”.'));
+        sec.append(selectF('Ajuste', clip, 'fit', FIT_OPTS));
+        sec.append(checkF('Espelhar imagem', clip, 'mirror'));
+        sec.append(h('div', { class: 'btn-row' },
+          h('button', { class: 'btn small', onclick: fill }, '↻ Atualizar lista'),
+          h('button', { class: 'btn small', onclick: () => { stopStream(clip.id); startStream(clip, ensureMedia(clip)); } }, 'Reconectar'),
+          h('button', { class: 'btn small', onclick: () => stopStream(clip.id) }, 'Desligar câmera')));
+        break;
+      }
+      case 'screen':
+        sec.append(selectF('Ajuste', clip, 'fit', FIT_OPTS));
+        sec.append(h('div', { class: 'hint' }, 'Mostra uma janela (ex.: PowerPoint, navegador, Holyrics) ou a tela inteira. O navegador pergunta qual janela ao colocar no ar.'));
+        sec.append(h('div', { class: 'btn-row' },
+          h('button', { class: 'btn small', onclick: () => { stopStream(clip.id); startStream(clip, ensureMedia(clip)); } }, 'Escolher janela/tela…'),
+          h('button', { class: 'btn small', onclick: () => stopStream(clip.id) }, 'Parar captura')));
+        break;
+    }
+
+    sec.append(h('div', { class: 'btn-row' },
+      h('button', { class: 'btn small', onclick: () => { const l = layerOfClip(clip.id); if (l) triggerClip(l, clip.id, { keepSlide: true }); } }, '▶ Colocar no ar'),
+      h('button', { class: 'btn small', onclick: () => duplicateClip(clip.id) }, '⧉ Duplicar'),
+      h('button', { class: 'btn small danger', onclick: () => removeClip(clip.id) }, '🗑 Remover')));
+    return sec;
+  }
+
+  function textControls(sec, clip) {
+    const s = clip.style;
+    const onStyle = () => { renderSlidesDebounced(); };
+    const ta = h('textarea', {
+      rows: 10, value: clip.text, spellcheck: true,
+      placeholder: 'Cole a letra aqui.\n\nDeixe uma linha em branco\nentre as estrofes.',
+      oninput: () => {
+        clip.text = ta.value;
+        const n = getSlides(clip).length;
+        if (clip.slide >= n) clip.slide = Math.max(0, n - 1);
+        refreshCell(clip);
+        renderSlidesDebounced();
+        scheduleSave();
+      },
+    });
+    sec.append(h('div', { class: 'f full' }, ta));
+    sec.append(h('div', { class: 'hint' }, 'Uma linha em branco = novo slide. O texto diminui sozinho se não couber.'));
+
+    sec.append(h('h4', {}, 'Modelos rápidos'));
+    sec.append(h('div', { class: 'btn-row' }, Object.keys(TEXT_PRESETS).map((name) =>
+      h('button', { class: 'btn small', onclick: () => { Object.assign(s, TEXT_PRESETS[name]); scheduleSave(); renderInspector(); renderSlides(); } }, name))));
+
+    sec.append(h('h4', {}, 'Fonte'));
+    sec.append(selectF('Fonte', s, 'font', FONTS.map((f) => [f, f])));
+    sec.append(rangeF('Tamanho', s, 'size', 20, 220, 1, null, (v) => v + 'px'));
+    sec.append(h('div', { class: 'inline' }, checkF('Negrito', s, 'bold'), checkF('Itálico', s, 'italic'), checkF('MAIÚSCULAS', s, 'uppercase', onStyle)));
+    sec.append(colorF('Cor do texto', s, 'color'));
+    sec.append(h('div', { class: 'f' }, h('span', { class: 'fl' }, 'Contorno'),
+      (() => {
+        const out = h('span', { class: 'fv' }, String(s.outline));
+        const r = h('input', { type: 'range', min: 0, max: 12, step: 1, value: s.outline, oninput: () => { s.outline = +r.value; out.textContent = r.value; scheduleSave(); } });
+        return h('div', { class: 'inline' }, r, colorInput(s, 'outlineColor'), out);
+      })(), h('span')));
+    sec.append(checkF('Sombra', s, 'shadow'));
+
+    sec.append(h('h4', {}, 'Posição'));
+    sec.append(selectF('Vertical', s, 'valign', [['top', 'Topo'], ['middle', 'Centro'], ['bottom', 'Rodapé']]));
+    sec.append(selectF('Alinhamento', s, 'align', [['left', 'Esquerda'], ['center', 'Centro'], ['right', 'Direita']]));
+    sec.append(rangeF('Margem', s, 'margin', 0, 400, 5, null, (v) => v + 'px'));
+    sec.append(rangeF('Entrelinhas', s, 'lineHeight', 0.8, 2, 0.05, null, (v) => v.toFixed(2)));
+
+    sec.append(h('h4', {}, 'Fundo atrás do texto'));
+    sec.append(selectF('Tipo', s, 'box', [['none', 'Nenhum'], ['box', 'Caixa'], ['band', 'Faixa (largura toda)']]));
+    sec.append(colorF('Cor do fundo', s, 'boxColor'));
+    sec.append(rangeF('Opacidade', s, 'boxOpacity', 0, 1, 0.05, null, (v) => Math.round(v * 100) + '%'));
+
+    sec.append(h('h4', {}, 'Transição'));
+    sec.append(rangeF('Entre slides', s, 'transition', 0, 2, 0.05, null, (v) => v.toFixed(2) + 's'));
+  }
+
+  function layerSection(layer) {
+    const sec = h('section', { class: 'insp-sec' });
+    const fx = layer.fx;
+    sec.append(h('h3', {}, 'Camada ', h('span', { class: 'muted' }, `${P.layers.indexOf(layer) + 1} de ${P.layers.length}`)));
+    sec.append(textF('Nome', layer, 'name', () => {
+      const n = $(`.layer-head[data-layer="${layer.id}"] .lh-name`);
+      if (n) n.textContent = layer.name;
+    }));
+    sec.append(h('div', { class: 'hint' }, 'Opacidade, modo de mistura e tempo de transição ficam no cabeçalho da camada, na grade.'));
+    sec.append(h('h4', {}, 'Efeitos'));
+    const pct = (v) => v + '%';
+    sec.append(rangeF('Brilho', fx, 'brightness', 0, 200, 1, null, pct));
+    sec.append(rangeF('Contraste', fx, 'contrast', 0, 200, 1, null, pct));
+    sec.append(rangeF('Saturação', fx, 'saturate', 0, 200, 1, null, pct));
+    sec.append(rangeF('Matiz', fx, 'hue', -180, 180, 1, null, (v) => v + '°'));
+    sec.append(rangeF('Desfoque', fx, 'blur', 0, 30, 0.5, null, (v) => v + 'px'));
+    sec.append(rangeF('Zoom', fx, 'zoom', 50, 200, 1, null, pct));
+    sec.append(h('div', { class: 'hint' }, 'Dica: desfoque + brilho baixo no fundo deixa a letra mais legível.'));
+    sec.append(h('div', { class: 'btn-row' },
+      h('button', { class: 'btn small', onclick: () => { layer.fx = defaultFx(); scheduleSave(); renderInspector(); } }, 'Zerar efeitos'),
+      h('button', { class: 'btn small', title: 'Mover para cima (fica por cima)', onclick: () => { moveLayer(layer, 1); renderInspector(); } }, '▲ Subir'),
+      h('button', { class: 'btn small', onclick: () => { moveLayer(layer, -1); renderInspector(); } }, '▼ Descer'),
+      h('button', { class: 'btn small danger', onclick: () => removeLayer(layer) }, 'Remover camada')));
+    return sec;
+  }
+
+  function renderAll() {
+    renderDeck();
+    renderInspector();
+    renderSlides();
+  }
+
+  // =====================================================================
+  // Barra superior e atalhos
+  // =====================================================================
+  function setupTopbar() {
+    const sel = $('#selRes');
+    sel.innerHTML = RESOLUTIONS.map(([w, hh, n]) => `<option value="${w}x${hh}">${w}×${hh} — ${n}</option>`).join('');
+    const cur = `${P.width}x${P.height}`;
+    if (!RESOLUTIONS.some(([w, hh]) => `${w}x${hh}` === cur)) sel.insertAdjacentHTML('afterbegin', `<option value="${cur}">${P.width}×${P.height}</option>`);
+    sel.value = cur;
+    const master = $('#master');
+    master.value = P.master;
+    $('#masterVal').textContent = Math.round(P.master * 100) + '%';
+  }
+
+  $('#selRes').addEventListener('change', (e) => {
+    const [w, hh] = e.target.value.split('x').map(Number);
+    P.width = w; P.height = hh;
+    layoutCache.clear();
+    scheduleSave();
+  });
+  $('#master').addEventListener('input', (e) => {
+    P.master = parseFloat(e.target.value);
+    $('#masterVal').textContent = Math.round(P.master * 100) + '%';
+    scheduleSave();
+  });
+  $('#master').addEventListener('dblclick', (e) => { P.master = 1; e.target.value = 1; $('#masterVal').textContent = '100%'; scheduleSave(); });
+  $('#btnOutput').addEventListener('click', openOutput);
+  $('#btnBlackout').addEventListener('click', () => setBlackout(!rt.blackout));
+  $('#btnClearAll').addEventListener('click', clearAll);
+  $('#btnMenu').addEventListener('click', (e) => {
+    if (!mainMenu.classList.contains('hidden')) { hidePopovers(); return; }
+    showPopover(mainMenu, e.currentTarget);
+  });
+  mainMenu.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-menu]');
+    if (!b) return;
+    hidePopovers();
+    switch (b.dataset.menu) {
+      case 'addlayer': addLayer(); break;
+      case 'addcol': addColumns(1); renderDeck(); scheduleSave(); break;
+      case 'screen2': moveOutputToSecondScreen(); break;
+      case 'help': $('#helpDlg').showModal(); break;
+      case 'new':
+        if (!confirm('Apagar TODO o projeto (clipes, letras e vídeos guardados) e começar do zero?')) return;
+        for (const id of Object.keys(rt.media)) disposeMedia(id);
+        rt.layers = {}; rt.textAnim = {}; rt.liveText = null;
+        pendingBlobs.clear(); slidesCache.clear(); layoutCache.clear();
+        try { await DB.clear('media'); } catch (_) {}
+        P = defaultProject();
+        ui.selClip = ui.selLayer = null;
+        setupTopbar(); renderAll(); saveNow();
+        break;
+    }
+  });
+  $('#helpDlg').addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target === e.currentTarget) $('#helpDlg').close(); });
+
+  // Sliders/selects soltam o foco depois de usados, para as setas voltarem a trocar os slides
+  document.addEventListener('change', (e) => {
+    if (e.target.matches('input[type=range], select, input[type=checkbox], input[type=color]')) e.target.blur();
+  });
+
+  function handleKey(e) {
+    const t = e.target;
+    const tag = t && t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) {
+      if (e.key === 'Escape') t.blur();
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if ($('#helpDlg').open) return;
+    switch (e.key) {
+      case 'ArrowRight': case 'ArrowDown': case 'PageDown':
+        e.preventDefault(); stepSlide(1); return;
+      case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
+        e.preventDefault(); stepSlide(-1); return;
+      case 'b': case 'B': case '.':
+        e.preventDefault(); setBlackout(!rt.blackout); return;
+      case 'c': case 'C':
+        e.preventDefault(); clearLyrics(); return;
+      case 'Escape':
+        hidePopovers(); return;
+      case 'Delete':
+        if (ui.selClip) { e.preventDefault(); removeClip(ui.selClip); }
+        return;
+      case '?': case 'F1':
+        e.preventDefault(); $('#helpDlg').showModal(); return;
+    }
+    if (/^[1-9]$/.test(e.key)) { e.preventDefault(); triggerColumn(+e.key - 1); }
+  }
+  window.addEventListener('keydown', handleKey);
+
+  window.addEventListener('beforeunload', (e) => {
+    clearTimeout(saveTimer);
+    saveNow();
+    if (rt.outWin && !rt.outWin.closed) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  // =====================================================================
+  // Inicialização
+  // =====================================================================
+  async function init() {
+    let saved = null;
+    try { saved = await DB.get('kv', 'project'); } catch (e) { console.warn('IndexedDB indisponível', e); }
+    P = saved && saved.version === 1 ? normalize(saved) : defaultProject();
+    setupTopbar();
+    renderAll();
+    for (const clip of Object.values(P.clips)) if (clip.type === 'video' || clip.type === 'image') ensureMedia(clip);
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+    keepAwake();
+    schedule();
+    if (!saved) saveNow();
+    // expõe para depuração no console
+    window.CDL = { get project() { return P; }, rt, triggerColumn, clearAll };
+  }
+  init();
+})();

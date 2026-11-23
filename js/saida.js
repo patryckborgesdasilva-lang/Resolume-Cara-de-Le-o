@@ -20,39 +20,54 @@
   const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // -------------------------------------------------------------------
-  // Só letras (PNG transparente com transição suave)
+  // Só letras: fundo transparente, animadas aqui mesmo com o motor js/texto.js
   // -------------------------------------------------------------------
   async function letras() {
     document.title = 'Letras — Cara de Leão';
-    const imgs = [document.createElement('img'), document.createElement('img')];
-    imgs.forEach((i) => { i.alt = ''; document.body.appendChild(i); });
-    let ativa = 0, versao = '', urls = [null, null];
+    const cv = document.createElement('canvas');
+    cv.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:contain;display:block';
+    document.body.appendChild(cv);
+    const c = cv.getContext('2d');
+    const anim = window.CDLTexto.criarAnimador();
+    const itens = new Map(); // id -> { text, style, filter, alvo, alpha, fade }
+    let W = 1920, H = 1080, versao = '', ultimo = performance.now();
+
+    function quadro(agoraMs) {
+      const dt = Math.min(0.1, (agoraMs - ultimo) / 1000);
+      ultimo = agoraMs;
+      if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+      c.clearRect(0, 0, W, H);
+      for (const [id, it] of itens) {
+        const passo = it.fade > 0 ? dt / it.fade : 1;
+        it.alpha = it.alvo > it.alpha ? Math.min(it.alvo, it.alpha + passo) : Math.max(it.alvo, it.alpha - passo);
+        if (it.alvo === 0 && it.alpha <= 0.001) { itens.delete(id); anim.reset(id); continue; }
+        c.filter = it.filter || 'none';
+        anim.desenhar(c, id, it.style, it.text, W, H, it.alpha, agoraMs / 1000);
+        c.filter = 'none';
+      }
+      requestAnimationFrame(quadro);
+    }
+    requestAnimationFrame(quadro);
+
     status('Aguardando o painel de controle…');
     for (;;) {
       try {
         const r = await ponte('GET', 'estado/letras?v=' + encodeURIComponent(versao));
         if (r.status === 200) {
           versao = r.headers.get('X-Versao') || '';
-          let meta = {};
-          try { meta = JSON.parse(r.headers.get('X-Meta') || '{}'); } catch (_) { /* ok */ }
-          const blob = await r.blob();
-          const fade = Math.max(0, +meta.fade || 0);
-          const prox = 1 - ativa;
-          if (blob.size) {
-            if (urls[prox]) URL.revokeObjectURL(urls[prox]);
-            urls[prox] = URL.createObjectURL(blob);
-            imgs[prox].src = urls[prox];
-            try { await imgs[prox].decode(); } catch (_) { /* ok */ }
+          const st = await r.json();
+          W = st.w || W; H = st.h || H;
+          const vivos = new Set();
+          for (const n of st.items || []) {
+            vivos.add(n.id);
+            const it = itens.get(n.id);
+            if (!it) itens.set(n.id, { text: n.text, style: n.style, filter: n.filter, alvo: n.opacity, alpha: 0, fade: n.fade || st.fade || 0 });
+            else Object.assign(it, { text: n.text, style: n.style, filter: n.filter, alvo: n.opacity, fade: n.fade || st.fade || 0 });
           }
-          imgs.forEach((i) => { i.style.transitionDuration = fade + 's'; });
-          imgs[ativa].style.opacity = '0';
-          imgs[prox].style.opacity = blob.size ? '1' : '0';
-          ativa = prox;
+          for (const [id, it] of itens) if (!vivos.has(id)) { it.alvo = 0; it.fade = st.fade || 0; }
           status('');
-        } else if (r.status !== 204) {
-          status('Ponte respondeu ' + r.status);
-        }
-        await espera(120);
+        } else if (r.status !== 204) status('Ponte respondeu ' + r.status);
+        await espera(100);
       } catch (_) {
         status('Sem conexão com a ponte local. Abra o programa pelo Iniciar-Windows.bat.');
         await espera(1500);

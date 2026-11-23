@@ -97,8 +97,8 @@
     ['difference', 'Diferença'],
     ['luminosity', 'Luminosidade'],
   ];
-  const FONTS = ['Arial', 'Arial Black', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Segoe UI',
-    'Calibri', 'Georgia', 'Times New Roman', 'Impact', 'Courier New'];
+  const TX = window.CDLTexto;
+  const Animador = TX.criarAnimador();
   const RESOLUTIONS = [
     [1920, 1080, 'Full HD 16:9'], [1280, 720, 'HD 16:9'], [3840, 2160, '4K 16:9'],
     [1024, 768, 'Projetor 4:3'], [1400, 1050, 'Projetor 4:3 (SXGA+)'], [1280, 800, 'Projetor 16:10'],
@@ -112,19 +112,42 @@
   const defaultObsWs = () => ({ host: '127.0.0.1', port: 4455, password: '', enabled: false });
   const FIT_OPTS = [['cover', 'Preencher (corta bordas)'], ['contain', 'Encaixar (sem cortar)'], ['stretch', 'Esticar']];
 
-  const defaultFx = () => ({ brightness: 100, contrast: 100, saturate: 100, hue: 0, blur: 0, zoom: 100 });
+  const defaultFx = () => ({
+    brightness: 100, contrast: 100, saturate: 100, hue: 0, blur: 0, zoom: 100,
+    gray: 0, vignette: 0, tint: 0, tintColor: '#f5a524', mirror: false, posX: 0, posY: 0,
+  });
+  // "Looks" de camada no estilo das igrejas que usam Resolume (IMAG = câmera no telão)
+  const FX_PRESETS = {
+    'Limpo': {},
+    'Câmera P&B dramática': { gray: 100, contrast: 130, brightness: 95, vignette: 55 },
+    'Cinema': { contrast: 115, saturate: 85, vignette: 60, tint: 12, tintColor: '#ff9a3c' },
+    'Tom quente': { tint: 22, tintColor: '#ff8a1f', saturate: 110 },
+    'Tom frio': { tint: 22, tintColor: '#2f7bff', saturate: 90 },
+    'Fundo desfocado (atrás da letra)': { blur: 14, brightness: 60, vignette: 30 },
+    'Quadro no canto (PiP)': { zoom: 35, posX: 30, posY: 28 },
+  };
   const defaultTextStyle = () => ({
-    font: 'Arial', size: 80, bold: true, italic: false, uppercase: false,
-    color: '#ffffff', outline: 3, outlineColor: '#000000', shadow: true,
+    font: 'Arial', size: 80, weight: 700, italic: false, uppercase: false, letterSpacing: 0,
+    color: '#ffffff', gradient: false, color2: '#f5a524',
+    outline: 3, outlineColor: '#000000', shadow: true, glow: 0, glowColor: '#ffffff',
     align: 'center', valign: 'middle',
     box: 'none', boxColor: '#000000', boxOpacity: 0.55,
-    margin: 90, lineHeight: 1.2, transition: 0.3,
+    margin: 90, lineHeight: 1.2,
+    anim: 'fade', animDur: 0.5, stagger: 0.05, exitAnim: 'fade', exitDur: 0.35, idle: 'nenhum',
   });
+  // Visuais prontos inspirados em operações de letras com Resolume em igrejas
+  const BASE_LOOK = { italic: false, uppercase: false, letterSpacing: 0, gradient: false, glow: 0, outline: 0, shadow: true, box: 'none', idle: 'nenhum', stagger: 0.05, lineHeight: 1.2, align: 'center' };
   const TEXT_PRESETS = {
-    'Letra (centro)': { valign: 'middle', align: 'center', size: 80, box: 'none', outline: 3, shadow: true, margin: 90, uppercase: false, italic: false },
-    'Legenda (rodapé)': { valign: 'bottom', align: 'center', size: 54, box: 'band', boxOpacity: 0.6, outline: 0, shadow: false, margin: 50, uppercase: false, italic: false },
-    'Versículo': { valign: 'middle', align: 'center', size: 64, box: 'box', boxOpacity: 0.5, outline: 0, shadow: true, margin: 140, uppercase: false, italic: false },
-    'Título': { valign: 'middle', align: 'center', size: 130, box: 'none', outline: 4, shadow: true, margin: 80, uppercase: true, italic: false },
+    'Letra clássica': { font: 'Arial', weight: 700, size: 80, outline: 3, valign: 'middle', margin: 90, anim: 'fade', animDur: 0.5, exitAnim: 'fade', exitDur: 0.35 },
+    'Worship moderno': { font: 'Montserrat', weight: 700, size: 76, uppercase: true, letterSpacing: 6, valign: 'middle', margin: 120, anim: 'desfoque', animDur: 0.8, exitAnim: 'desfoque', exitDur: 0.45, idle: 'respirar' },
+    'Palavra por palavra': { font: 'Poppins', weight: 700, size: 78, valign: 'middle', margin: 110, anim: 'palavra', animDur: 0.45, stagger: 0.09, exitAnim: 'fade', exitDur: 0.3 },
+    'Linha subindo': { font: 'Inter', weight: 700, size: 76, valign: 'middle', margin: 110, anim: 'subir', animDur: 0.6, stagger: 0.14, exitAnim: 'subir', exitDur: 0.4 },
+    'Impacto': { font: 'Bebas Neue', weight: 400, size: 150, uppercase: true, letterSpacing: 3, valign: 'middle', margin: 80, lineHeight: 1.0, anim: 'escala', animDur: 0.5, stagger: 0.07, exitAnim: 'zoom', exitDur: 0.35 },
+    'Máquina de escrever': { font: 'Courier New', weight: 700, size: 70, valign: 'middle', margin: 130, anim: 'maquina', stagger: 0.035, exitAnim: 'fade', exitDur: 0.3 },
+    'Cinema': { font: 'Playfair Display', weight: 400, italic: true, size: 78, valign: 'middle', margin: 140, anim: 'fade', animDur: 1.2, exitAnim: 'fade', exitDur: 0.8, idle: 'flutuar' },
+    'Brilho dourado': { font: 'Cinzel', weight: 700, size: 74, uppercase: true, gradient: true, color: '#fff6d5', color2: '#d9a521', glow: 22, glowColor: '#ffb300', valign: 'middle', margin: 120, anim: 'tracking', animDur: 1.0, exitAnim: 'fade', exitDur: 0.5, idle: 'brilho' },
+    'Legenda (rodapé)': { font: 'Inter', weight: 700, size: 54, valign: 'bottom', box: 'band', boxOpacity: 0.6, shadow: false, margin: 50, anim: 'subir', animDur: 0.45, stagger: 0.08, exitAnim: 'fade', exitDur: 0.3 },
+    'Versículo': { font: 'Lora', weight: 400, size: 64, valign: 'middle', box: 'box', boxOpacity: 0.5, margin: 140, anim: 'fade', animDur: 0.7, exitAnim: 'fade', exitDur: 0.4 },
   };
 
   function newLayer(name, cols) {
@@ -132,7 +155,7 @@
   }
   function newTextClip(name, text, presetName) {
     const style = defaultTextStyle();
-    if (presetName) Object.assign(style, TEXT_PRESETS[presetName]);
+    if (presetName) Object.assign(style, BASE_LOOK, TEXT_PRESETS[presetName]);
     return { id: uid(), type: 'text', name, text, slide: 0, style };
   }
   function newColorClip(name, color, color2, gradient, dir) {
@@ -141,7 +164,7 @@
 
   function defaultProject() {
     const cols = 8;
-    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {}, holyrics: defaultHolyrics(), obs: defaultObs(), obsWs: defaultObsWs() };
+    const p = { version: 1, width: 1920, height: 1080, columns: cols, master: 1, masterFade: 0.6, layers: [], clips: {}, holyrics: defaultHolyrics(), obs: defaultObs(), obsWs: defaultObsWs(), fontesLocais: [] };
     // camadas ficam guardadas de baixo (índice 0) para cima
     const fundo = newLayer('Fundo', cols);
     const midia = newLayer('Mídia', cols);
@@ -169,6 +192,7 @@
     p.obs = Object.assign(defaultObs(), p.obs);
     p.obsWs = Object.assign(defaultObsWs(), p.obsWs);
     p.layers = Array.isArray(p.layers) && p.layers.length ? p.layers : d.layers;
+    p.fontesLocais = Array.isArray(p.fontesLocais) ? p.fontesLocais : [];
     for (const l of p.layers) {
       l.fx = Object.assign(defaultFx(), l.fx);
       if (typeof l.opacity !== 'number') l.opacity = 1;
@@ -179,8 +203,13 @@
       l.clips = l.clips.slice(0, p.columns).map((id) => (id && p.clips[id] ? id : null));
     }
     for (const c of Object.values(p.clips)) {
-      if (c.type === 'text') { c.style = Object.assign(defaultTextStyle(), c.style); c.slide = c.slide || 0; c.text = c.text || ''; }
-      if (c.type === 'holyrics') c.style = Object.assign(defaultTextStyle(), c.style);
+      if (isTextLike(c)) {
+        const old = c.style || {};
+        if (old.weight == null) old.weight = old.bold === false ? 400 : 700;
+        c.style = Object.assign(defaultTextStyle(), old);
+        delete c.style.bold; delete c.style.transition;
+      }
+      if (c.type === 'text') { c.slide = c.slide || 0; c.text = c.text || ''; }
       if (c.type === 'obs') { c.fps = +c.fps || 10; c.res = c.res || 'media'; }
       if (c.type === 'holybg') { c.fit = c.fit || 'cover'; if (typeof c.transition !== 'number') c.transition = 0.8; }
       if (c.type === 'video') { c.speed = c.speed || 1; c.volume = c.volume == null ? 1 : c.volume; c.loop = c.loop !== false; }
@@ -197,7 +226,6 @@
   const rt = {
     layers: {},          // id da camada -> { current, prev, t0, canvas, ctx }
     media: {},           // id do clipe -> { el, url, ready, stream, error }
-    textAnim: {},        // id do clipe -> { from, t0 } (transição entre slides)
     liveText: null,      // último clipe de texto colocado no ar
     blackout: false,
     blackLevel: 0,       // 0 = normal, 1 = preto
@@ -390,7 +418,7 @@
     }
     if (isTextLike(clip)) {
       if (clip.type === 'text' && !opts.keepSlide) clip.slide = 0;
-      delete rt.textAnim[clipId];
+      Animador.reset(clipId);
       rt.liveText = clipId;
     }
     if (L.prev) { const old = L.prev.clipId; L.prev = null; stopClipMedia(old); }
@@ -455,8 +483,6 @@
     const n = getSlides(clip).length;
     idx = clamp(idx, 0, Math.max(0, n - 1));
     if (idx === clip.slide) return;
-    if (isLive(clip.id) && (clip.style.transition || 0) > 0) rt.textAnim[clip.id] = { fromText: clipText(clip), t0: performance.now() };
-    else delete rt.textAnim[clip.id];
     clip.slide = idx;
     scheduleSave();
     updateSlidesActive(true);
@@ -479,114 +505,13 @@
     for (const l of P.layers) { const r = layerRt(l.id); if (r.current && r.current.clipId === clip.id) clearLayer(l); }
   }
 
-  const layoutCache = new Map();
-  function layoutText(c, clip, text, W, H) {
-    const s = clip.style;
-    const key = `${W}x${H}|${JSON.stringify(s)}|${text}`;
-    const hit = layoutCache.get(key);
-    if (hit) return hit;
-    const k = H / 1080;
-    const maxW = Math.max(50, W - 2 * s.margin * k);
-    const maxH = Math.max(50, H - 2 * s.margin * k);
-    const txt = s.uppercase ? text.toLocaleUpperCase('pt-BR') : text;
-    let size = s.size * k;
-    let out = null;
-    for (let i = 0; i < 40; i++) {
-      const font = `${s.italic ? 'italic ' : ''}${s.bold ? 'bold ' : ''}${Math.round(size)}px "${s.font}", Arial, sans-serif`;
-      c.font = font;
-      const lines = [];
-      let widest = 0;
-      for (const para of txt.split('\n')) {
-        const words = para.split(/\s+/).filter(Boolean);
-        if (!words.length) { lines.push(''); continue; }
-        let line = words[0];
-        for (let w = 1; w < words.length; w++) {
-          const test = line + ' ' + words[w];
-          if (c.measureText(test).width <= maxW) line = test;
-          else { lines.push(line); line = words[w]; }
-        }
-        lines.push(line);
-      }
-      for (const ln of lines) widest = Math.max(widest, c.measureText(ln).width);
-      const lineH = size * s.lineHeight;
-      out = { font, lines, lineH, blockW: widest, blockH: lines.length * lineH, size };
-      if ((out.blockH <= maxH && widest <= maxW) || size <= 14 * k) break;
-      size *= 0.93;
-    }
-    if (layoutCache.size > 300) layoutCache.clear();
-    layoutCache.set(key, out);
-    return out;
-  }
-
-  function hexToRgba(hex, a) {
-    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
-    const n = m ? parseInt(m[1], 16) : 0;
-    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
-  }
-
   function clipText(clip) {
     if (clip.type === 'holyrics') return Holy.text;
     return getSlides(clip)[clip.slide || 0] || '';
   }
 
-  function drawSlide(c, clip, text, alpha, W, H) {
-    if (!text || alpha <= 0.001) return;
-    const s = clip.style, k = H / 1080;
-    const lay = layoutText(c, clip, text, W, H);
-    const margin = s.margin * k;
-    const y0 = s.valign === 'top' ? margin : s.valign === 'bottom' ? H - margin - lay.blockH : (H - lay.blockH) / 2;
-    const x = s.align === 'left' ? margin : s.align === 'right' ? W - margin : W / 2;
-
-    c.save();
-    c.globalAlpha = alpha;
-    if (s.box !== 'none') {
-      const pad = lay.size * 0.45;
-      c.fillStyle = hexToRgba(s.boxColor, s.boxOpacity);
-      if (s.box === 'band') c.fillRect(0, y0 - pad, W, lay.blockH + pad * 2);
-      else {
-        const bx = s.align === 'left' ? x - pad : s.align === 'right' ? x - lay.blockW - pad : x - lay.blockW / 2 - pad;
-        c.fillRect(bx, y0 - pad, lay.blockW + pad * 2, lay.blockH + pad * 2);
-      }
-    }
-    c.font = lay.font;
-    c.textAlign = s.align;
-    c.textBaseline = 'middle';
-    c.lineJoin = 'round';
-    c.miterLimit = 2;
-    const setShadow = (on) => {
-      c.shadowColor = on ? 'rgba(0,0,0,0.85)' : 'transparent';
-      c.shadowBlur = on ? 14 * k : 0;
-      c.shadowOffsetY = on ? 4 * k : 0;
-    };
-    lay.lines.forEach((ln, i) => {
-      const y = y0 + lay.lineH * (i + 0.5);
-      if (s.outline > 0) {
-        setShadow(s.shadow);
-        c.strokeStyle = s.outlineColor;
-        c.lineWidth = s.outline * 2 * k;
-        c.strokeText(ln, x, y);
-        setShadow(false);
-      } else setShadow(s.shadow);
-      c.fillStyle = s.color;
-      c.fillText(ln, x, y);
-    });
-    c.restore();
-  }
-
   function drawTextClip(c, clip, alpha, now, W, H) {
-    const text = clipText(clip);
-    const anim = rt.textAnim[clip.id];
-    if (anim) {
-      const d = (clip.style.transition || 0) * 1000;
-      const p = d > 0 ? Math.min(1, (now - anim.t0) / d) : 1;
-      if (p < 1) {
-        drawSlide(c, clip, anim.fromText, alpha * (1 - p), W, H);
-        drawSlide(c, clip, text, alpha * p, W, H);
-        return;
-      }
-      delete rt.textAnim[clip.id];
-    }
-    drawSlide(c, clip, text, alpha, W, H);
+    Animador.desenhar(c, clip.id, clip.style, clipText(clip), W, H, alpha, now / 1000);
   }
 
   // =====================================================================
@@ -681,7 +606,30 @@
     }
     if (cur) drew = drawClip(c, cur, p, now, p * layerGain, W, H) || drew;
     c.globalAlpha = 1;
+    if (drew) layerPostFx(c, layer.fx, W, H);
     return drew ? L.canvas : null;
+  }
+
+  // vinheta e tom de cor (só onde a camada tem imagem)
+  function layerPostFx(c, fx, W, H) {
+    if (!(fx.vignette > 0) && !(fx.tint > 0)) return;
+    c.save();
+    c.globalCompositeOperation = 'source-atop';
+    if (fx.tint > 0) {
+      c.globalAlpha = Math.min(1, fx.tint / 100);
+      c.fillStyle = fx.tintColor || '#f5a524';
+      c.fillRect(0, 0, W, H);
+    }
+    if (fx.vignette > 0) {
+      const r = Math.hypot(W, H) / 2;
+      const g = c.createRadialGradient(W / 2, H / 2, r * (0.75 - 0.45 * fx.vignette / 100), W / 2, H / 2, r);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, `rgba(0,0,0,${Math.min(1, 0.35 + 0.65 * fx.vignette / 100)})`);
+      c.globalAlpha = 1;
+      c.fillStyle = g;
+      c.fillRect(0, 0, W, H);
+    }
+    c.restore();
   }
 
   function fxFilter(fx) {
@@ -690,6 +638,7 @@
     if (fx.contrast !== 100) parts.push(`contrast(${fx.contrast}%)`);
     if (fx.saturate !== 100) parts.push(`saturate(${fx.saturate}%)`);
     if (fx.hue !== 0) parts.push(`hue-rotate(${fx.hue}deg)`);
+    if (fx.gray > 0) parts.push(`grayscale(${fx.gray}%)`);
     if (fx.blur > 0) parts.push(`blur(${(fx.blur * P.height / 1080).toFixed(1)}px)`);
     return parts.length ? parts.join(' ') : 'none';
   }
@@ -718,11 +667,16 @@
       ctx.globalAlpha = layer.opacity;
       ctx.globalCompositeOperation = layer.blend;
       ctx.filter = fxFilter(layer.fx);
-      const z = (layer.fx.zoom || 100) / 100;
-      if (z !== 1) {
-        const dw = W * z, dh = H * z;
-        ctx.drawImage(lc, (W - dw) / 2, (H - dh) / 2, dw, dh);
-      } else ctx.drawImage(lc, 0, 0);
+      const fx = layer.fx;
+      const z = (fx.zoom || 100) / 100;
+      const dw = W * z, dh = H * z;
+      const dx = (W - dw) / 2 + (fx.posX || 0) / 100 * W, dy = (H - dh) / 2 + (fx.posY || 0) / 100 * H;
+      if (fx.mirror) {
+        ctx.save(); ctx.translate(W, 0); ctx.scale(-1, 1);
+        ctx.drawImage(lc, W - dx - dw, dy, dw, dh);
+        ctx.restore();
+      } else if (z !== 1 || dx || dy) ctx.drawImage(lc, dx, dy, dw, dh);
+      else ctx.drawImage(lc, 0, 0);
     }
     ctx.filter = 'none';
     ctx.globalCompositeOperation = 'source-over';
@@ -1032,7 +986,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     }
     disposeMedia(id);
     delete P.clips[id];
-    delete rt.textAnim[id];
+    Animador.reset(id);
     slidesCache.delete(id);
     if (clip.mediaKey && !Object.values(P.clips).some((c) => c.mediaKey === clip.mediaKey)) {
       pendingBlobs.delete(clip.mediaKey);
@@ -1511,24 +1465,72 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
 
   function styleControls(sec, clip) {
     const s = clip.style;
-    const onStyle = () => { renderSlidesDebounced(); };
-    sec.append(h('h4', {}, 'Modelos rápidos'));
-    sec.append(h('div', { class: 'btn-row' }, Object.keys(TEXT_PRESETS).map((name) =>
-      h('button', { class: 'btn small', onclick: () => { Object.assign(s, TEXT_PRESETS[name]); scheduleSave(); renderInspector(); renderSlides(); } }, name))));
+    const redo = () => { renderInspector(); renderSlidesDebounced(); };
+    const testar = () => Animador.reset(clip.id);
 
+    sec.append(h('h4', {}, 'Visual pronto (estilo Resolume)'));
+    sec.append(h('div', { class: 'look-grid' }, Object.keys(TEXT_PRESETS).map((name) =>
+      h('button', { class: 'btn small look', onclick: () => { Object.assign(s, BASE_LOOK, TEXT_PRESETS[name]); TX.garantirFonte(s.font); scheduleSave(); testar(); redo(); } }, name))));
+
+    // ---- fonte
     sec.append(h('h4', {}, 'Fonte'));
-    sec.append(selectF('Fonte', s, 'font', FONTS.map((f) => [f, f])));
-    sec.append(rangeF('Tamanho', s, 'size', 20, 220, 1, null, (v) => v + 'px'));
-    sec.append(h('div', { class: 'inline' }, checkF('Negrito', s, 'bold'), checkF('Itálico', s, 'italic'), checkF('MAIÚSCULAS', s, 'uppercase', onStyle)));
+    const fsel = h('select', { onchange: () => { s.font = fsel.value; TX.garantirFonte(s.font); scheduleSave(); testar(); } },
+      h('optgroup', { label: 'Fontes da web (precisam de internet)' }, TX.FONTES_WEB.map((f) => h('option', { value: f }, f))),
+      h('optgroup', { label: 'Fontes do Windows' }, TX.FONTES_SISTEMA.map((f) => h('option', { value: f }, f))),
+      P.fontesLocais.length ? h('optgroup', { label: 'Instaladas neste computador' }, P.fontesLocais.map((f) => h('option', { value: f }, f))) : null);
+    if (![...TX.FONTES_WEB, ...TX.FONTES_SISTEMA, ...P.fontesLocais].includes(s.font)) fsel.prepend(h('option', { value: s.font }, s.font));
+    fsel.value = s.font;
+    sec.append(field('Fonte', fsel));
+    if ('queryLocalFonts' in window) {
+      sec.append(h('div', { class: 'btn-row', style: 'margin-top:0' }, h('button', {
+        class: 'btn small', onclick: async () => {
+          try {
+            const fams = [...new Set((await window.queryLocalFonts()).map((f) => f.family))].sort((a, b) => a.localeCompare(b));
+            P.fontesLocais = fams; scheduleSave(); redo();
+            toast(`${fams.length} fontes do computador adicionadas à lista.`);
+          } catch (_) { toast('O navegador não deu acesso às fontes do computador.'); }
+        },
+      }, '🔎 Usar fontes instaladas no computador')));
+    }
+    sec.append(selectF('Peso', s, 'weight', [['400', 'Normal'], ['700', 'Negrito'], ['900', 'Extra negrito']], () => { s.weight = +s.weight; testar(); }));
+    sec.append(rangeF('Tamanho', s, 'size', 20, 240, 1, null, (v) => v + 'px'));
+    sec.append(rangeF('Espaço letras', s, 'letterSpacing', -5, 40, 1, null, (v) => v + 'px'));
+    sec.append(h('div', { class: 'inline' }, checkF('Itálico', s, 'italic'), checkF('MAIÚSCULAS', s, 'uppercase', () => renderSlidesDebounced())));
+
+    // ---- cor e acabamento
+    sec.append(h('h4', {}, 'Cor e acabamento'));
     sec.append(colorF('Cor do texto', s, 'color'));
+    sec.append(checkF('Degradê na letra', s, 'gradient', redo));
+    if (s.gradient) sec.append(colorF('Cor de baixo', s, 'color2'));
     sec.append(h('div', { class: 'f' }, h('span', { class: 'fl' }, 'Contorno'),
       (() => {
         const out = h('span', { class: 'fv' }, String(s.outline));
         const r = h('input', { type: 'range', min: 0, max: 12, step: 1, value: s.outline, oninput: () => { s.outline = +r.value; out.textContent = r.value; scheduleSave(); } });
         return h('div', { class: 'inline' }, r, colorInput(s, 'outlineColor'), out);
       })(), h('span')));
+    sec.append(h('div', { class: 'f' }, h('span', { class: 'fl' }, 'Brilho (glow)'),
+      (() => {
+        const out = h('span', { class: 'fv' }, String(s.glow));
+        const r = h('input', { type: 'range', min: 0, max: 60, step: 1, value: s.glow, oninput: () => { s.glow = +r.value; out.textContent = r.value; scheduleSave(); } });
+        return h('div', { class: 'inline' }, r, colorInput(s, 'glowColor'), out);
+      })(), h('span')));
     sec.append(checkF('Sombra', s, 'shadow'));
 
+    // ---- animação
+    sec.append(h('h4', {}, 'Animação'));
+    const opts = (o) => Object.entries(o);
+    sec.append(selectF('Entrada', s, 'anim', opts(TX.ANIMS), () => { testar(); redo(); }));
+    if (s.anim !== 'maquina' && s.anim !== 'nenhuma') sec.append(rangeF('Duração', s, 'animDur', 0.1, 3, 0.05, null, (v) => v.toFixed(2) + 's'));
+    if (['subir', 'cair', 'palavra', 'letra', 'maquina', 'escala', 'tracking'].includes(s.anim)) {
+      sec.append(rangeF(s.anim === 'maquina' ? 'Velocidade' : 'Atraso entre partes', s, 'stagger', 0.01, 0.4, 0.01, null, (v) => v.toFixed(2) + 's'));
+    }
+    sec.append(selectF('Saída', s, 'exitAnim', opts(TX.SAIDAS)));
+    if (s.exitAnim !== 'nenhuma') sec.append(rangeF('Duração saída', s, 'exitDur', 0.1, 2, 0.05, null, (v) => v.toFixed(2) + 's'));
+    sec.append(selectF('Enquanto no ar', s, 'idle', opts(TX.IDLES)));
+    sec.append(h('div', { class: 'btn-row' }, h('button', { class: 'btn small', onclick: testar }, '▶ Repetir a animação')));
+    sec.append(h('div', { class: 'hint' }, 'A animação roda a cada troca de slide (também quando o Holyrics avança) e vale para o projetor e as saídas do OBS.'));
+
+    // ---- posição
     sec.append(h('h4', {}, 'Posição'));
     sec.append(selectF('Vertical', s, 'valign', [['top', 'Topo'], ['middle', 'Centro'], ['bottom', 'Rodapé']]));
     sec.append(selectF('Alinhamento', s, 'align', [['left', 'Esquerda'], ['center', 'Centro'], ['right', 'Direita']]));
@@ -1539,9 +1541,6 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     sec.append(selectF('Tipo', s, 'box', [['none', 'Nenhum'], ['box', 'Caixa'], ['band', 'Faixa (largura toda)']]));
     sec.append(colorF('Cor do fundo', s, 'boxColor'));
     sec.append(rangeF('Opacidade', s, 'boxOpacity', 0, 1, 0.05, null, (v) => Math.round(v * 100) + '%'));
-
-    sec.append(h('h4', {}, 'Transição'));
-    sec.append(rangeF('Entre slides', s, 'transition', 0, 2, 0.05, null, (v) => v.toFixed(2) + 's'));
   }
 
   function layerSection(layer) {
@@ -1560,8 +1559,23 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     sec.append(rangeF('Saturação', fx, 'saturate', 0, 200, 1, null, pct));
     sec.append(rangeF('Matiz', fx, 'hue', -180, 180, 1, null, (v) => v + '°'));
     sec.append(rangeF('Desfoque', fx, 'blur', 0, 30, 0.5, null, (v) => v + 'px'));
-    sec.append(rangeF('Zoom', fx, 'zoom', 50, 200, 1, null, pct));
-    sec.append(h('div', { class: 'hint' }, 'Dica: desfoque + brilho baixo no fundo deixa a letra mais legível.'));
+    sec.append(rangeF('Preto e branco', fx, 'gray', 0, 100, 1, null, pct));
+    sec.append(rangeF('Vinheta', fx, 'vignette', 0, 100, 1, null, pct));
+    sec.append(h('div', { class: 'f' }, h('span', { class: 'fl' }, 'Tom de cor'),
+      (() => {
+        const out = h('span', { class: 'fv' }, fx.tint + '%');
+        const r = h('input', { type: 'range', min: 0, max: 80, step: 1, value: fx.tint, oninput: () => { fx.tint = +r.value; out.textContent = r.value + '%'; scheduleSave(); } });
+        return h('div', { class: 'inline' }, r, colorInput(fx, 'tintColor'), out);
+      })(), h('span')));
+    sec.append(h('h4', {}, 'Tamanho e posição'));
+    sec.append(rangeF('Zoom', fx, 'zoom', 10, 200, 1, null, pct));
+    sec.append(rangeF('Posição X', fx, 'posX', -50, 50, 1, null, pct));
+    sec.append(rangeF('Posição Y', fx, 'posY', -50, 50, 1, null, pct));
+    sec.append(checkF('Espelhar', fx, 'mirror'));
+    sec.append(h('h4', {}, 'Looks prontos'));
+    sec.append(h('div', { class: 'look-grid' }, Object.keys(FX_PRESETS).map((name) =>
+      h('button', { class: 'btn small look', onclick: () => { layer.fx = Object.assign(defaultFx(), FX_PRESETS[name]); scheduleSave(); renderInspector(); } }, name))));
+    sec.append(h('div', { class: 'hint' }, 'Dica: câmera em P&B ou desfocada atrás da letra é muito usada em igrejas para a letra ler melhor. “Quadro no canto” deixa a câmera pequena sobre o fundo.'));
     sec.append(h('div', { class: 'btn-row' },
       h('button', { class: 'btn small', onclick: () => { layer.fx = defaultFx(); scheduleSave(); renderInspector(); } }, 'Zerar efeitos'),
       h('button', { class: 'btn small', title: 'Mover para cima (fica por cima)', onclick: () => { moveLayer(layer, 1); renderInspector(); } }, '▲ Subir'),
@@ -1593,7 +1607,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   $('#selRes').addEventListener('change', (e) => {
     const [w, hh] = e.target.value.split('x').map(Number);
     P.width = w; P.height = hh;
-    layoutCache.clear();
+    TX.limparCache();
     scheduleSave();
   });
   $('#master').addEventListener('input', (e) => {
@@ -1621,8 +1635,8 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
       case 'new':
         if (!confirm('Apagar TODO o projeto (clipes, letras e vídeos guardados) e começar do zero?')) return;
         for (const id of Object.keys(rt.media)) disposeMedia(id);
-        rt.layers = {}; rt.textAnim = {}; rt.liveText = null;
-        pendingBlobs.clear(); slidesCache.clear(); layoutCache.clear();
+        rt.layers = {}; rt.liveText = null;
+        pendingBlobs.clear(); slidesCache.clear(); TX.limparCache();
         try { await DB.clear('media'); } catch (_) {}
         P = defaultProject();
         ui.selClip = ui.selLayer = null;
@@ -1781,10 +1795,6 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
 
   function setHolyText(t) {
     if (t === Holy.text) return;
-    const now = performance.now();
-    for (const c of holyClips()) {
-      if (isLive(c.id) && (c.style.transition || 0) > 0) rt.textAnim[c.id] = { fromText: Holy.text, t0: now };
-    }
     Holy.text = t;
     holyClips().forEach(refreshCell);
   }
@@ -2488,44 +2498,36 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     if (e) { const n = obsConnected(); e.textContent = n ? `● ${n} conectado${n > 1 ? 's' : ''}` : 'nenhum OBS conectado'; e.classList.toggle('on', n > 0); }
   }
 
-  // Saída "só letras": quando a letra no ar muda, desenha só os textos num PNG transparente
-  // e entrega para a página do OBS pela ponte.
-  const Overlay = { sig: null, ids: '', busy: false, again: false, canvas: null };
+  // Saída "só letras": manda para a página do OBS o texto, o estilo e a opacidade das letras no ar.
+  // A página do OBS anima com o mesmo motor de texto (js/texto.js), com fundo transparente.
+  const Overlay = { sig: null, ids: '', busy: false, again: false, pending: null };
 
   function overlayState() {
-    const W = P.width, H = P.height;
     const items = [];
     if (!rt.blackout) {
       for (const layer of P.layers) {
         const L = rt.layers[layer.id];
         const clip = L && L.current && P.clips[L.current.clipId];
         if (!isTextLike(clip) || layer.bypass || layer.opacity <= 0) continue;
-        const text = clipText(clip);
-        if (!text) continue;
-        items.push({ layer, clip, text });
+        items.push({ id: clip.id, text: clipText(clip), style: clip.style, opacity: layer.opacity, filter: fxFilter(layer.fx), fade: layer.fade || 0 });
       }
     }
-    const sig = `${W}x${H}|` + items.map((i) => [i.clip.id, i.text, JSON.stringify(i.clip.style), i.layer.opacity, JSON.stringify(i.layer.fx)].join('\u0001')).join('\u0002');
-    return { sig, items, ids: items.map((i) => i.clip.id).join(',') };
+    const sig = `${P.width}x${P.height}|` + JSON.stringify(items);
+    return { sig, items, ids: items.map((i) => i.id).join(',') };
   }
 
   function overlayCheck() {
     const st = overlayState();
     if (st.sig === Overlay.sig) return;
-    // mesma(s) letra(s) mudando de slide → transição do texto; entrou/saiu → fade da camada
     let fade = 0.3;
     if (Overlay.sig !== null) {
-      if (st.ids === Overlay.ids && st.items.length) fade = st.items[0].clip.style.transition || 0;
-      else {
-        const layers = new Set([...st.items.map((i) => i.layer)]);
-        for (const id of Overlay.ids.split(',').filter(Boolean)) { const l = layerOfClip(id); if (l) layers.add(l); }
-        fade = Math.max(0, ...[...layers].map((l) => l.fade || 0));
-        if (rt.blackout) fade = P.masterFade || 0.5;
-      }
+      const layers = new Set();
+      for (const id of [...st.ids.split(','), ...Overlay.ids.split(',')].filter(Boolean)) { const l = layerOfClip(id); if (l) layers.add(l); }
+      fade = rt.blackout ? (P.masterFade || 0.5) : Math.max(0, ...[...layers].map((l) => l.fade || 0));
     }
     Overlay.sig = st.sig;
     Overlay.ids = st.ids;
-    Overlay.pending = { st, fade };
+    Overlay.pending = JSON.stringify({ w: P.width, h: P.height, fade, items: st.items });
     overlaySend();
   }
 
@@ -2535,22 +2537,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     try {
       do {
         Overlay.again = false;
-        const { st, fade } = Overlay.pending;
-        let blob = new Blob([]);
-        if (st.items.length) {
-          const W = P.width, H = P.height;
-          const cv = Overlay.canvas || (Overlay.canvas = document.createElement('canvas'));
-          cv.width = W; cv.height = H;
-          const c = cv.getContext('2d');
-          c.clearRect(0, 0, W, H);
-          for (const it of st.items) {
-            c.filter = fxFilter(it.layer.fx);
-            drawSlide(c, it.clip, it.text, it.layer.opacity, W, H);
-          }
-          c.filter = 'none';
-          blob = await new Promise((res) => cv.toBlob(res, 'image/png'));
-        }
-        await ponte('POST', 'estado/letras', blob, { 'Content-Type': 'image/png', 'X-Meta': JSON.stringify({ fade: +fade.toFixed(2), w: P.width, h: P.height }) });
+        await ponte('POST', 'estado/letras', Overlay.pending, { 'Content-Type': 'application/json' });
       } while (Overlay.again);
     } catch (e) { console.warn('Saída de letras', e); }
     Overlay.busy = false;
@@ -2630,7 +2617,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
           h('button', { class: 'btn small', onclick: () => moveOutputToScreen(scr) }, 'Enviar projetor para esta tela'),
           h('button', {
             class: 'btn small', onclick: () => {
-              P.width = pw; P.height = ph; layoutCache.clear(); setupTopbar(); scheduleSave();
+              P.width = pw; P.height = ph; TX.limparCache(); setupTopbar(); scheduleSave();
               toast(`Resolução do programa: ${pw}×${ph}`);
             },
           }, 'Usar esta resolução'))));

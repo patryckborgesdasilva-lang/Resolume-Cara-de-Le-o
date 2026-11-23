@@ -305,3 +305,6 @@ dialog.wide { max-width: 900px; }
 
 .file-tile img:not([src]) { display: none; }
 .file-tile.has-img .tile-ph { display: none; }
+
+.look-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.look-grid .look { text-align: left; white-space: normal; line-height: 1.25; }

@@ -28,6 +28,58 @@ Não precisa instalar nada.
 - **Blackout** com fade e **Master** para escurecer tudo.
 - **Salva sozinho** no navegador, inclusive os vídeos e imagens.
 
+## Montagem com 2 computadores (Holyrics num, OBS e este programa no outro)
+
+```
+ COMPUTADOR 1 (Holyrics)                    COMPUTADOR 2 (OBS + Cara de Leão)
+ ┌──────────────────────┐   rede (IP)       ┌───────────────────────────────────────────────┐
+ │ operador passa a     │ ───────────────▶  │ Cara de Leão                                  │
+ │ letra normalmente    │  letra + fundo    │  camada Letras  ← letra do Holyrics, animada  │
+ │ API Server ligado    │                   │  camada Mídia   ← câmera (câmera virtual OBS) │
+ │ pasta de mídia       │                   │  camada Fundo   ← fundo do Holyrics + efeitos │
+ │ compartilhada        │                   │        │                                      │
+ └──────────────────────┘                   │        ▼  saida.html / saida.html?letras      │
+                                            │ OBS ── fonte Navegador ──▶ transmissão        │
+                                            └───────────────────────────────────────────────┘
+```
+
+**Computador 1 (Holyrics):**
+1. Arquivo → Configurações → **API Server**: ative, crie o token (permissões listadas na seção Holyrics) e anote
+   o **IP** deste computador e a porta.
+2. Compartilhe na rede a **pasta de mídia** do Holyrics (para os fundos virem em qualidade total).
+3. O operador segue passando a letra normalmente.
+
+**Computador 2 (OBS + este programa):**
+1. Abra pelo `Iniciar-Windows.bat`.
+2. **Holyrics** (barra de cima) → IP do computador 1, porta, token → Testar conexão.
+3. `+` → **Holyrics em camadas**: fundo e letra em camadas separadas. No clipe de fundo, cole o caminho da pasta
+   compartilhada (ex.: `\\COMPUTADOR1\Holyrics`).
+4. **OBS** (barra de cima) → conectar → `+` na camada do meio → **OBS — câmera virtual** (câmera da placa de
+   captura; no OBS, câmera virtual com *Tipo de saída: Fonte* → placa).
+5. Escolha um **visual de letra** (Worship moderno, Palavra por palavra, Impacto…) e **looks** de câmera/fundo.
+6. **Saídas** → copie o endereço e adicione no OBS como fonte **Navegador** (programa completo, ou só as letras
+   com fundo transparente por cima da câmera do próprio OBS).
+
+## Letras animadas (estilo Resolume)
+
+A letra que vem do Holyrics (ou de um clipe de texto) é redesenhada aqui com fonte e animação próprias, como nas
+igrejas que operam letras pelo Resolume (Text Animator). A animação roda a cada troca de slide e aparece igual no
+projetor e nas duas saídas do OBS.
+
+- **Visuais prontos:** Letra clássica, Worship moderno, Palavra por palavra, Linha subindo, Impacto, Máquina de
+  escrever, Cinema, Brilho dourado, Legenda (rodapé), Versículo.
+- **Entrada:** suave, subir/descer linha a linha, palavra por palavra, letra por letra, máquina de escrever,
+  desfoque → nítido, zoom, pulo, espaçamento abrindo, com duração e atraso entre partes ajustáveis.
+- **Saída:** suave, subir e sumir, desfocar, zoom, ou a entrada invertida.
+- **Enquanto no ar:** respirar, flutuar, brilho pulsando, onda nas letras.
+- **Fontes:** 20 fontes da web (Montserrat, Bebas Neue, Cinzel, Playfair…, precisam de internet), as do Windows e
+  as **instaladas no computador** (botão *Usar fontes instaladas no computador*). Peso, espaçamento entre letras,
+  degradê, contorno, brilho (glow) e sombra.
+
+**Looks de camada** (câmera e fundo): Câmera P&B dramática, Cinema, Tom quente/frio, Fundo desfocado (atrás da
+letra), Quadro no canto (PiP). Efeitos individuais: brilho, contraste, saturação, matiz, desfoque, preto e branco,
+vinheta, tom de cor, zoom, posição X/Y e espelhar.
+
 ## Como usar
 
 1. Baixe este repositório (botão **Code → Download ZIP**) e descompacte.
@@ -210,7 +262,8 @@ iniciar-mac-linux.sh  → abre o programa com a ponte (Mac/Linux, precisa de Nod
 index.html            → página principal (painel de controle)
 saida.html            → saída para o OBS / navegador (js/saida.js)
 css/style.css         → visual
-js/app.js             → camadas, letras, projetor, Holyrics, NDI e salvamento
+js/app.js             → camadas, projetor, Holyrics, OBS, NDI e salvamento
+js/texto.js           → motor de letras animadas (usado no painel e na saída do OBS)
 ponte/ponte.ps1       → ponte local em PowerShell (Windows)
 ponte/ponte.js        → a mesma ponte em Node.js
 ```

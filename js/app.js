@@ -146,6 +146,7 @@
     'Máquina de escrever': { font: 'Courier New', weight: 700, size: 70, valign: 'middle', margin: 130, anim: 'maquina', stagger: 0.035, exitAnim: 'fade', exitDur: 0.3 },
     'Cinema': { font: 'Playfair Display', weight: 400, italic: true, size: 78, valign: 'middle', margin: 140, anim: 'fade', animDur: 1.2, exitAnim: 'fade', exitDur: 0.8, idle: 'flutuar' },
     'Brilho dourado': { font: 'Cinzel', weight: 700, size: 74, uppercase: true, gradient: true, color: '#fff6d5', color2: '#d9a521', glow: 22, glowColor: '#ffb300', valign: 'middle', margin: 120, anim: 'tracking', animDur: 1.0, exitAnim: 'fade', exitDur: 0.5, idle: 'brilho' },
+    'Rodapé transmissão': { font: 'Montserrat', weight: 700, size: 56, uppercase: true, letterSpacing: 2, valign: 'bottom', margin: 64, lineHeight: 1.25, box: 'degrade', boxColor: '#000000', boxOpacity: 0.8, anim: 'subir', animDur: 0.5, stagger: 0.1, exitAnim: 'fade', exitDur: 0.3 },
     'Legenda (rodapé)': { font: 'Inter', weight: 700, size: 54, valign: 'bottom', box: 'band', boxOpacity: 0.6, shadow: false, margin: 50, anim: 'subir', animDur: 0.45, stagger: 0.08, exitAnim: 'fade', exitDur: 0.3 },
     'Versículo': { font: 'Lora', weight: 400, size: 64, valign: 'middle', box: 'box', boxOpacity: 0.5, margin: 140, anim: 'fade', animDur: 0.7, exitAnim: 'fade', exitDur: 0.4 },
   };
@@ -1538,7 +1539,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     sec.append(rangeF('Entrelinhas', s, 'lineHeight', 0.8, 2, 0.05, null, (v) => v.toFixed(2)));
 
     sec.append(h('h4', {}, 'Fundo atrás do texto'));
-    sec.append(selectF('Tipo', s, 'box', [['none', 'Nenhum'], ['box', 'Caixa'], ['band', 'Faixa (largura toda)']]));
+    sec.append(selectF('Tipo', s, 'box', [['none', 'Nenhum'], ['box', 'Caixa'], ['band', 'Faixa (largura toda)'], ['degrade', 'Degradê suave (transmissão)']]));
     sec.append(colorF('Cor do fundo', s, 'boxColor'));
     sec.append(rangeF('Opacidade', s, 'boxOpacity', 0, 1, 0.05, null, (v) => Math.round(v * 100) + '%'));
   }

@@ -259,7 +259,18 @@
       c.globalAlpha = alpha * (unidade ? easeOut(blocoP) : (bloco.a == null ? 1 : bloco.a)) * (s.boxOpacity == null ? 0.55 : s.boxOpacity);
       c.fillStyle = hexToRgba(s.boxColor, 1);
       if (s.box === 'band') c.fillRect(0, L.y0 - pad, W, L.blockH + pad * 2);
-      else c.fillRect(L.cx - L.blockW / 2 - pad, L.y0 - pad, L.blockW + pad * 2, L.blockH + pad * 2);
+      else if (s.box === 'degrade') {
+        // degradê suave atrás do texto (no rodapé, vai até a borda de baixo) — típico de transmissão
+        const noRodape = s.valign === 'bottom';
+        const top = Math.max(0, L.y0 - pad * 3.2);
+        const bottom = noRodape ? H : Math.min(H, L.y0 + L.blockH + pad * 3.2);
+        const g = c.createLinearGradient(0, top, 0, bottom);
+        g.addColorStop(0, hexToRgba(s.boxColor, 0));
+        g.addColorStop(noRodape ? 0.55 : 0.5, hexToRgba(s.boxColor, 1));
+        g.addColorStop(1, hexToRgba(s.boxColor, noRodape ? 1 : 0));
+        c.fillStyle = g;
+        c.fillRect(0, top, W, bottom - top);
+      } else c.fillRect(L.cx - L.blockW / 2 - pad, L.y0 - pad, L.blockW + pad * 2, L.blockH + pad * 2);
       c.restore();
     }
     c.font = L.font;

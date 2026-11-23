@@ -76,6 +76,21 @@ projetor e nas duas saídas do OBS.
   as **instaladas no computador** (botão *Usar fontes instaladas no computador*). Peso, espaçamento entre letras,
   degradê, contorno, brilho (glow) e sombra.
 
+### Visual de evento (identidade visual estilo conferência)
+
+- **Fundos animados gerados pelo programa** (`+` → *Fundo animado*): cortina de luz em faixas verticais,
+  linhas topográficas com traços geométricos, papel texturizado, feixes de luz e partículas (essa com fundo
+  transparente, para ir por cima de outras camadas). Cor, velocidade e intensidade ajustáveis.
+- **Palavra gigante:** mostra a letra uma palavra de cada vez, ocupando a tela (com *Condensar* para a palavra
+  ficar alta e estreita).
+- **Desgaste:** textura de impressão gasta na letra.
+- **Reta + manuscrita:** uma linha que começa com `~` sai em fonte manuscrita, encaixada por cima da linha de
+  cima. Ex.: `ATÉ SERMOS` e na linha de baixo `~um`. Funciona também com o texto vindo do Holyrics.
+- **Grão de filme** e looks *Filme antigo* e *Evento vermelho* nas camadas.
+- **Resolução personalizada** para telão de LED panorâmico (ex.: 2992×768).
+- Visuais prontos: *Palavra gigante*, *Título desgastado*, *Assinatura (reta + manuscrita)*.
+- Logos e artes do evento (PNG com fundo transparente) entram como imagem numa camada.
+
 **Looks de camada** (câmera e fundo): Câmera P&B dramática, Cinema, Tom quente/frio, Fundo desfocado (atrás da
 letra), Quadro no canto (PiP). Efeitos individuais: brilho, contraste, saturação, matiz, desfoque, preto e branco,
 vinheta, tom de cor, zoom, posição X/Y e espelhar.

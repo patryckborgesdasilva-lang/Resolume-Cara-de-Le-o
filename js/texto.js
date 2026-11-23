@@ -2,9 +2,12 @@
  * Motor de texto animado — Cara de Leão Projeção
  * Usado pelo painel (app.js) e pela saída de letras do OBS (saida.js), para os dois animarem igual.
  *
- * Inspirado no jeito que igrejas operam letras no Resolume (Text Animator): entrada por linha,
- * palavra ou letra com atraso escalonado, desfoque, escala com "pulo", espaçamento abrindo,
- * e efeitos contínuos enquanto a letra está no ar (respirar, flutuar, brilho, onda).
+ * Inspirado no jeito que igrejas operam letras no Resolume (Text Animator) e em identidades visuais
+ * de eventos: entrada por linha, palavra ou letra com atraso escalonado, desfoque, escala com "pulo",
+ * espaçamento abrindo, palavra gigante uma por vez, textura desgastada, mistura de fonte reta com
+ * manuscrita, e efeitos contínuos (respirar, flutuar, brilho, onda).
+ *
+ * Marcação no texto: uma linha que começa com "~" usa a fonte manuscrita (ex.: "ATÉ SERMOS" / "~um").
  */
 (function () {
   'use strict';
@@ -18,17 +21,19 @@
     'Montserrat': '400;700;900', 'Poppins': '400;700;900', 'Bebas Neue': '400', 'Oswald': '400;700',
     'Anton': '400', 'Archivo Black': '400', 'League Spartan': '400;700;900', 'Raleway': '400;700;900',
     'Inter': '400;700;900', 'Lato': '400;700;900', 'Open Sans': '400;700', 'Nunito': '400;700;900',
-    'Barlow Condensed': '400;700;900', 'Playfair Display': '400;700;900', 'Lora': '400;700',
-    'Cinzel': '400;700;900', 'Roboto Slab': '400;700;900', 'Dancing Script': '400;700',
-    'Great Vibes': '400', 'Caveat': '400;700',
+    'Barlow Condensed': '400;700;900', 'Big Shoulders Display': '400;700;900', 'Antonio': '400;700',
+    'Six Caps': '400', 'Pathway Gothic One': '400',
+    'Playfair Display': '400;700;900', 'Lora': '400;700', 'Cinzel': '400;700;900', 'Roboto Slab': '400;700;900',
+    'Dancing Script': '400;700', 'Great Vibes': '400', 'Pinyon Script': '400', 'Caveat': '400;700',
   };
   const FONTES_SISTEMA = ['Arial', 'Arial Black', 'Helvetica', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Segoe UI',
     'Calibri', 'Georgia', 'Times New Roman', 'Impact', 'Courier New'];
 
   const cache = new Map();
+  const gigCache = new Map();
   const injetadas = new Set();
   const ouvintes = new Set();
-  function limparCache() { cache.clear(); ouvintes.forEach((f) => { try { f(); } catch (_) { /* ok */ } }); }
+  function limparCache() { cache.clear(); gigCache.clear(); ouvintes.forEach((f) => { try { f(); } catch (_) { /* ok */ } }); }
   if (typeof document !== 'undefined' && document.fonts) {
     document.fonts.addEventListener('loadingdone', limparCache);
   }
@@ -46,8 +51,12 @@
     document.head.appendChild(l);
   }
 
-  function fonteCss(s, px) {
-    return `${s.italic ? 'italic ' : ''}${s.weight || 700} ${Math.max(1, Math.round(px))}px "${s.font}", Arial, sans-serif`;
+  const px = (v) => Math.max(1, Math.round(v));
+  function fonteCss(s, size) {
+    return `${s.italic ? 'italic ' : ''}${s.weight || 700} ${px(size)}px "${s.font}", Arial, sans-serif`;
+  }
+  function fonteAlt(s, size) {
+    return `400 ${px(size)}px "${s.font2 || 'Great Vibes'}", "Brush Script MT", cursive`;
   }
 
   // ---------------------------------------------------------------- animações
@@ -55,6 +64,7 @@
     nenhuma: 'Nenhuma (corte seco)', fade: 'Suave (fade)', subir: 'Subir linha a linha', cair: 'Descer linha a linha',
     palavra: 'Palavra por palavra', letra: 'Letra por letra', maquina: 'Máquina de escrever',
     desfoque: 'Desfoque → nítido', zoom: 'Zoom suave', escala: 'Pulo (palavra por palavra)', tracking: 'Espaçamento abrindo',
+    gigante: 'Palavra gigante (uma por vez)',
   };
   const SAIDAS = { nenhuma: 'Nenhuma (corte seco)', fade: 'Suave (fade)', subir: 'Subir e sumir', desfoque: 'Desfocar', zoom: 'Zoom e sumir', mesma: 'Igual à entrada, invertida' };
   const IDLES = { nenhum: 'Nenhum', respirar: 'Respirar (zoom lento)', flutuar: 'Flutuar', brilho: 'Brilho pulsando', onda: 'Onda nas letras' };
@@ -62,63 +72,77 @@
 
   // ---------------------------------------------------------------- layout
   function layout(c, s, text, W, H) {
-    const key = `${W}x${H}|${s.font}|${s.weight}|${s.italic}|${s.size}|${s.uppercase}|${s.margin}|${s.lineHeight}|${s.letterSpacing}|${s.align}|${s.valign}|${text}`;
+    const key = `${W}x${H}|${s.font}|${s.weight}|${s.italic}|${s.size}|${s.uppercase}|${s.margin}|${s.lineHeight}|${s.letterSpacing}|${s.align}|${s.valign}|${s.font2}|${s.font2Scale}|${text}`;
     const hit = cache.get(key);
     if (hit) return hit;
     garantirFonte(s.font);
     const k = H / 1080;
     const margin = (s.margin || 0) * k;
     const maxW = Math.max(50, W - 2 * margin), maxH = Math.max(50, H - 2 * margin);
-    const txt = s.uppercase ? text.toLocaleUpperCase('pt-BR') : text;
+    const paras = text.split('\n').map((p) => {
+      const alt = /^\s*~/.test(p);
+      const t = alt ? p.replace(/^\s*~\s*/, '') : p;
+      return { alt, t: !alt && s.uppercase ? t.toLocaleUpperCase('pt-BR') : t };
+    });
+    if (paras.some((p) => p.alt)) garantirFonte(s.font2 || 'Great Vibes');
+    const altScale = s.font2Scale || 1.5;
     const base = (s.size || 80) * k;
     let size = base, out = null;
     for (let i = 0; i < 40; i++) {
-      const font = fonteCss(s, size);
-      c.font = font;
+      const fMain = fonteCss(s, size), fAlt = fonteAlt(s, size * altScale);
       const ls = (s.letterSpacing || 0) * k * (size / base);
-      const medir = (str) => c.measureText(str).width + Math.max(0, Array.from(str).length - 1) * ls;
+      const medidor = (font, lsv) => (str) => { c.font = font; return c.measureText(str).width + Math.max(0, Array.from(str).length - 1) * lsv; };
+      const mMain = medidor(fMain, ls), mAlt = medidor(fAlt, 0);
       const linhas = [];
-      for (const para of txt.split('\n')) {
-        const words = para.split(/\s+/).filter(Boolean);
-        if (!words.length) { linhas.push(''); continue; }
+      for (const para of paras) {
+        const m = para.alt ? mAlt : mMain;
+        const words = para.t.split(/\s+/).filter(Boolean);
+        if (!words.length) { linhas.push({ text: '', alt: para.alt }); continue; }
         let line = words[0];
         for (let w = 1; w < words.length; w++) {
           const test = line + ' ' + words[w];
-          if (medir(test) <= maxW) line = test; else { linhas.push(line); line = words[w]; }
+          if (m(test) <= maxW) line = test; else { linhas.push({ text: line, alt: para.alt }); line = words[w]; }
         }
-        linhas.push(line);
+        linhas.push({ text: line, alt: para.alt });
       }
-      let widest = 0;
-      for (const ln of linhas) widest = Math.max(widest, medir(ln));
-      const lineH = size * (s.lineHeight || 1.2);
-      out = { font, size, ls, lineH, linhas, widest, blockH: linhas.length * lineH, medir };
-      if ((out.blockH <= maxH && widest <= maxW) || size <= 14 * k) break;
+      let widest = 0, blockH = 0;
+      for (const ln of linhas) {
+        ln.font = ln.alt ? fAlt : fMain;
+        ln.size = ln.alt ? size * altScale : size;
+        ln.ls = ln.alt ? 0 : ls;
+        ln.width = (ln.alt ? mAlt : mMain)(ln.text);
+        ln.h = ln.alt ? ln.size * 0.3 : size * (s.lineHeight || 1.2); // manuscrita "encaixa" por cima da linha de cima
+        widest = Math.max(widest, ln.width);
+        blockH += ln.h;
+      }
+      out = { size, ls, linhas, widest, blockH };
+      if ((blockH <= maxH && widest <= maxW) || size <= 14 * k) break;
       size *= 0.93;
     }
-    // posições de cada letra (para as animações por letra/palavra)
-    c.font = out.font;
+    // posições de cada linha e letra (para as animações por letra/palavra)
     const y0 = s.valign === 'top' ? margin : s.valign === 'bottom' ? H - margin - out.blockH : (H - out.blockH) / 2;
-    let gi = 0, wi = 0;
+    let gi = 0, wi = 0, y = y0;
     const lines = out.linhas.map((ln, li) => {
-      const width = out.medir(ln);
-      const x0 = s.align === 'left' ? margin : s.align === 'right' ? W - margin - width : (W - width) / 2;
-      const chars = Array.from(ln);
+      const x0 = s.align === 'left' ? margin : s.align === 'right' ? W - margin - ln.width : (W - ln.width) / 2;
+      const yc = y + ln.h / 2 - (ln.alt ? ln.size * 0.07 : 0);
+      y += ln.h;
+      c.font = ln.font;
       const glyphs = [];
       let prefix = '', emPalavra = false;
-      chars.forEach((ch, i) => {
-        const x = c.measureText(prefix).width + i * out.ls;
+      Array.from(ln.text).forEach((ch, i) => {
+        const x = c.measureText(prefix).width + i * ln.ls;
         const w = c.measureText(ch).width;
         const espaco = /\s/.test(ch);
-        if (!espaco && !emPalavra) { emPalavra = true; } else if (espaco && emPalavra) { emPalavra = false; wi++; }
+        if (!espaco && !emPalavra) emPalavra = true; else if (espaco && emPalavra) { emPalavra = false; wi++; }
         if (!espaco) glyphs.push({ ch, x, w, gi: gi++, wi });
         prefix += ch;
       });
       if (emPalavra) wi++;
-      return { text: ln, width, x0, y: y0 + out.lineH * (li + 0.5), li, glyphs };
+      return { text: ln.text, width: ln.width, x0, y: yc, li, glyphs, font: ln.font, size: ln.size, ls: ln.ls, alt: ln.alt };
     });
     const res = {
-      font: out.font, size: out.size, ls: out.ls, lineH: out.lineH, blockW: out.widest, blockH: out.blockH, y0, k,
-      lines, nLetras: gi, nPalavras: wi, nLinhas: lines.length,
+      size: out.size, blockW: out.widest, blockH: out.blockH, y0, k, lines,
+      nLetras: gi, nPalavras: wi, nLinhas: lines.length,
       cx: s.align === 'left' ? margin + out.widest / 2 : s.align === 'right' ? W - margin - out.widest / 2 : W / 2,
       cy: y0 + out.blockH / 2,
     };
@@ -134,8 +158,7 @@
   }
 
   // pinta um trecho de texto (brilho, contorno com sombra, preenchimento com cor ou degradê)
-  function pintar(c, s, L, str, x, y, glowMul) {
-    const k = L.k;
+  function pintar(c, s, k, size, str, x, y, glowMul) {
     const glow = (s.glow || 0) > 0 || s.idle === 'brilho';
     if (glow) {
       c.shadowColor = s.glowColor || '#ffffff';
@@ -158,7 +181,7 @@
       sombra(false);
     } else sombra(s.shadow);
     if (s.gradient) {
-      const g = c.createLinearGradient(0, y - L.size * 0.5, 0, y + L.size * 0.5);
+      const g = c.createLinearGradient(0, y - size * 0.5, 0, y + size * 0.5);
       g.addColorStop(0, s.color || '#fff');
       g.addColorStop(1, s.color2 || '#f5a524');
       c.fillStyle = g;
@@ -195,6 +218,10 @@
     }
   }
 
+  function stagger(s, anim) {
+    const v = s.stagger == null ? 0.05 : s.stagger;
+    return anim === 'maquina' ? Math.max(0.01, v) : v;
+  }
   function totalEntrada(s, L) {
     const anim = s.anim || 'fade';
     const un = UNIDADE[anim];
@@ -202,23 +229,88 @@
     const dur = anim === 'maquina' ? 0 : Math.max(0.01, s.animDur == null ? 0.6 : s.animDur);
     return dur + Math.max(0, n - 1) * stagger(s, anim);
   }
-  function stagger(s, anim) {
-    const v = s.stagger == null ? 0.05 : s.stagger;
-    return anim === 'maquina' ? Math.max(0.01, v) : v;
+
+  function efeitosContinuos(s, k, relogio) {
+    const idle = s.idle || 'nenhum';
+    return {
+      idle,
+      sc: idle === 'respirar' ? 1 + 0.02 * Math.sin(relogio * 0.9) : 1,
+      dy: idle === 'flutuar' ? 6 * k * Math.sin(relogio * 1.3) : 0,
+      glowMul: idle === 'brilho' ? 0.55 + 0.45 * Math.sin(relogio * 2.2) : 1,
+    };
+  }
+
+  // ---------------------------------------------------------------- palavra gigante
+  const palavras = (s, text) => (s.uppercase ? text.toLocaleUpperCase('pt-BR') : text).replace(/^\s*~\s*/gm, '').split(/\s+/).filter(Boolean);
+
+  function desenharGigante(c, s, text, W, H, alpha, fase, t, relogio, tin) {
+    const ws = palavras(s, text);
+    if (!ws.length) return fase !== 'out';
+    const d = Math.max(0.15, s.stagger == null ? 0.5 : s.stagger);
+    const tt = fase === 'in' ? t : (tin || 0);
+    const idx = s.gigLoop === false ? Math.min(ws.length - 1, Math.floor(tt / d)) : Math.floor(tt / d) % ws.length;
+    const w = ws[idx];
+    const k = H / 1080;
+    garantirFonte(s.font);
+    const sx = clamp(s.condensar || 1, 0.3, 1.5);
+    const key = `${W}x${H}|${s.font}|${s.weight}|${s.italic}|${s.letterSpacing}|${s.margin}|${sx}|${w}`;
+    let fs = gigCache.get(key);
+    if (!fs) {
+      c.font = fonteCss(s, 100);
+      const ls100 = (s.letterSpacing || 0) * k * (100 / ((s.size || 80) * k));
+      const m = c.measureText(w);
+      const wd = (m.width + Math.max(0, Array.from(w).length - 1) * ls100) * sx;
+      const asc = m.actualBoundingBoxAscent || 72, desc = m.actualBoundingBoxDescent || 0;
+      const largura = W - 2 * (s.margin || 0) * k;
+      const tam = Math.min(100 * (largura * 0.92) / Math.max(1, wd), 100 * (H * 0.78) / Math.max(1, asc + desc));
+      fs = { tam, a: asc / 100, d: desc / 100 };
+      if (gigCache.size > 300) gigCache.clear();
+      gigCache.set(key, fs);
+    }
+    let a, sc;
+    if (fase === 'in') {
+      const local = tt - Math.floor(tt / d) * d;
+      a = Math.min(1, local / 0.07);
+      sc = 1.1 - 0.1 * easeOut(Math.min(1, local / 0.28));
+    } else {
+      const dur = Math.max(0.01, s.exitDur == null ? 0.35 : s.exitDur);
+      const pe = clamp(t / dur, 0, 1);
+      if (pe >= 1) return false;
+      a = 1 - easeOut(pe); sc = 1 + 0.08 * pe;
+    }
+    const ef = efeitosContinuos(s, k, relogio);
+    c.save();
+    c.globalAlpha = alpha * a;
+    const tam = fs.tam;
+    c.font = fonteCss(s, tam);
+    if ('letterSpacing' in c) c.letterSpacing = ((s.letterSpacing || 0) * k * (tam / ((s.size || 80) * k))).toFixed(2) + 'px';
+    c.textAlign = 'center';
+    c.textBaseline = 'alphabetic';
+    c.lineJoin = 'round';
+    c.translate(W / 2, H / 2 + ef.dy);
+    c.scale(sc * ef.sc * sx, sc * ef.sc);
+    pintar(c, s, k, tam, w, 0, ((fs.a - fs.d) / 2) * tam, ef.glowMul);
+    if ('letterSpacing' in c) c.letterSpacing = '0px';
+    c.restore();
+    return true;
   }
 
   /*
    * Desenha o texto.
    *   fase 'in'  → t = segundos desde o começo da entrada
-   *   fase 'out' → t = segundos desde o começo da saída
+   *   fase 'out' → t = segundos desde o começo da saída (tin = quanto tempo ficou no ar)
    *   relogio    → segundos absolutos (para os efeitos contínuos)
    * Retorna false quando não há mais nada para desenhar (saída terminada).
    */
-  function desenhar(c, s, text, W, H, alpha, fase, t, relogio) {
+  function desenharBase(c, s, text, W, H, alpha, fase, t, relogio, tin) {
     if (!text || alpha <= 0.001) return fase !== 'out';
+    const animIn = s.anim || 'fade';
+    if (animIn === 'gigante') {
+      if (fase === 'out' && s.exitAnim === 'nenhuma') return false;
+      return desenharGigante(c, s, text, W, H, alpha, fase, t, relogio, tin);
+    }
     const L = layout(c, s, text, W, H);
     const k = L.k;
-    const animIn = s.anim || 'fade';
     let anim, dur, rev = false;
     if (fase === 'out' && s.exitAnim === 'mesma') { anim = animIn; rev = true; dur = Math.max(0.01, s.exitDur == null ? 0.35 : s.exitDur); }
     else if (fase === 'out') { anim = s.exitAnim || 'fade'; dur = Math.max(0.01, s.exitDur == null ? 0.35 : s.exitDur); }
@@ -242,13 +334,9 @@
     const bloco = fase === 'out' && !rev ? parametrosSaida(anim, clamp(t / dur, 0, 1), k)
       : unidade ? { a: anim === 'maquina' ? 1 : easeOut(blocoP) } : parametros(anim, blocoP, k);
 
-    // efeitos contínuos
-    const idle = s.idle || 'nenhum';
-    let sc = bloco.sc || 1, dy = bloco.dy || 0, glowMul = 1;
-    if (idle === 'respirar') sc *= 1 + 0.02 * Math.sin(relogio * 0.9);
-    if (idle === 'flutuar') dy += 6 * k * Math.sin(relogio * 1.3);
-    if (idle === 'brilho') glowMul = 0.55 + 0.45 * Math.sin(relogio * 2.2);
-    const porLetra = (!!unidade && !(fase === 'in' && fimEntrada)) || idle === 'onda';
+    const ef = efeitosContinuos(s, k, relogio);
+    const sc = (bloco.sc || 1) * ef.sc, dy = (bloco.dy || 0) + ef.dy, glowMul = ef.glowMul;
+    const porLetra = (!!unidade && !(fase === 'in' && fimEntrada)) || ef.idle === 'onda';
 
     c.save();
     c.globalAlpha = alpha;
@@ -273,7 +361,6 @@
       } else c.fillRect(L.cx - L.blockW / 2 - pad, L.y0 - pad, L.blockW + pad * 2, L.blockH + pad * 2);
       c.restore();
     }
-    c.font = L.font;
     c.textAlign = 'left';
     c.textBaseline = 'middle';
     c.lineJoin = 'round';
@@ -281,16 +368,22 @@
     if (bloco.blur) c.filter = `blur(${bloco.blur.toFixed(1)}px)`;
     if (sc !== 1 || dy) { c.translate(L.cx, L.cy + dy); c.scale(sc, sc); c.translate(-L.cx, -L.cy); }
     const aBloco = bloco.a == null ? 1 : bloco.a;
+    const temLs = 'letterSpacing' in c;
 
     if (!porLetra) {
-      if ('letterSpacing' in c) c.letterSpacing = L.ls ? L.ls.toFixed(2) + 'px' : '0px';
       c.globalAlpha = alpha * aBloco;
-      for (const ln of L.lines) if (ln.text) pintar(c, s, L, ln.text, ln.x0, ln.y, glowMul);
-      if ('letterSpacing' in c) c.letterSpacing = '0px';
+      for (const ln of L.lines) {
+        if (!ln.text) continue;
+        c.font = ln.font;
+        if (temLs) c.letterSpacing = ln.ls ? ln.ls.toFixed(2) + 'px' : '0px';
+        pintar(c, s, k, ln.size, ln.text, ln.x0, ln.y, glowMul);
+      }
+      if (temLs) c.letterSpacing = '0px';
     } else {
-      if ('letterSpacing' in c) c.letterSpacing = '0px';
+      if (temLs) c.letterSpacing = '0px';
       let cursor = null;
       for (const ln of L.lines) {
+        c.font = ln.font;
         const nG = ln.glyphs.length;
         for (let i = 0; i < nG; i++) {
           const g = ln.glyphs[i];
@@ -299,24 +392,85 @@
           const pp = unidade ? parametros(anim, pr, k) : { a: 1 };
           if (pp.a <= 0.001) continue;
           let gx = ln.x0 + g.x, gy = ln.y + (pp.dy || 0);
-          if (pp.track) gx += (i - (nG - 1) / 2) * pp.track * L.size * 0.35;
-          if (idle === 'onda') gy += 6 * k * Math.sin(relogio * 3 + g.gi * 0.45);
+          if (pp.track) gx += (i - (nG - 1) / 2) * pp.track * ln.size * 0.35;
+          if (ef.idle === 'onda') gy += 6 * k * Math.sin(relogio * 3 + g.gi * 0.45);
           c.save();
           c.globalAlpha = alpha * pp.a * (fase === 'out' && !rev ? aBloco : 1);
           if (pp.sc && pp.sc !== 1) { c.translate(gx + g.w / 2, gy); c.scale(pp.sc, pp.sc); c.translate(-(gx + g.w / 2), -gy); }
-          pintar(c, s, L, g.ch, gx, gy, glowMul);
+          pintar(c, s, k, ln.size, g.ch, gx, gy, glowMul);
           c.restore();
-          if (anim === 'maquina' && fase === 'in' && pr > 0) cursor = { x: gx + g.w + L.size * 0.06, y: ln.y };
+          if (anim === 'maquina' && fase === 'in' && pr > 0) cursor = { x: gx + g.w + ln.size * 0.06, y: ln.y, size: ln.size };
         }
       }
       if (cursor && !fimEntrada) {
         c.globalAlpha = alpha;
         c.fillStyle = s.color || '#fff';
-        c.fillRect(cursor.x, cursor.y - L.size * 0.4, Math.max(2, L.size * 0.07), L.size * 0.8);
+        c.fillRect(cursor.x, cursor.y - cursor.size * 0.4, Math.max(2, cursor.size * 0.07), cursor.size * 0.8);
       }
     }
     c.restore();
     return true;
+  }
+
+  // ---------------------------------------------------------------- textura desgastada
+  let grungeCv = null;
+  function grunge() {
+    if (grungeCv) return grungeCv;
+    const g = document.createElement('canvas');
+    g.width = g.height = 512;
+    const x = g.getContext('2d');
+    let sd = 12345;
+    const r = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 2600; i++) {
+      x.fillStyle = `rgba(0,0,0,${0.15 + 0.6 * r()})`;
+      const rad = r() < 0.93 ? 0.3 + r() * 0.9 : 1.2 + r() * 2.2;
+      x.beginPath(); x.arc(r() * 512, r() * 512, rad, 0, Math.PI * 2); x.fill();
+    }
+    for (let i = 0; i < 260; i++) { // falhas de tinta em faixas (impressão gasta)
+      x.fillStyle = `rgba(0,0,0,${0.08 + 0.25 * r()})`;
+      x.fillRect(r() * 512, r() * 512, 0.8 + r() * 2.5, 6 + r() * 40);
+    }
+    for (let i = 0; i < 40; i++) {
+      const cx = r() * 512, cy = r() * 512, rr = 8 + r() * 30;
+      const gr = x.createRadialGradient(cx, cy, 0, cx, cy, rr);
+      gr.addColorStop(0, `rgba(0,0,0,${0.15 + r() * 0.3})`); gr.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = gr; x.fillRect(cx - rr, cy - rr, rr * 2, rr * 2);
+    }
+    x.strokeStyle = 'rgba(0,0,0,0.6)';
+    for (let i = 0; i < 70; i++) {
+      x.lineWidth = 0.5 + r() * 1.2;
+      const sx = r() * 512, sy = r() * 512, len = 10 + r() * 60, ang = r() * Math.PI;
+      x.beginPath(); x.moveTo(sx, sy); x.lineTo(sx + Math.cos(ang) * len, sy + Math.sin(ang) * len); x.stroke();
+    }
+    grungeCv = g;
+    return g;
+  }
+
+  let off = null;
+  function desenhar(c, s, text, W, H, alpha, fase, t, relogio, tin) {
+    if (!(s.desgaste > 0) || typeof document === 'undefined') return desenharBase(c, s, text, W, H, alpha, fase, t, relogio, tin);
+    if (!text || alpha <= 0.001) return fase !== 'out';
+    if (!off) off = document.createElement('canvas');
+    if (off.width !== W || off.height !== H) { off.width = W; off.height = H; }
+    const o = off.getContext('2d');
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    o.globalAlpha = 1; o.globalCompositeOperation = 'source-over'; o.filter = 'none';
+    o.clearRect(0, 0, W, H);
+    const r = desenharBase(o, s, text, W, H, 1, fase, t, relogio, tin);
+    o.save();
+    o.globalCompositeOperation = 'destination-out';
+    o.globalAlpha = Math.min(1, s.desgaste / 100 * 1.2);
+    const pat = o.createPattern(grunge(), 'repeat');
+    const esc = Math.max(1, H / 1080);
+    if (pat.setTransform) pat.setTransform(new DOMMatrix().scale(esc, esc));
+    o.fillStyle = pat;
+    o.fillRect(0, 0, W, H);
+    o.restore();
+    c.save();
+    c.globalAlpha = alpha;
+    c.drawImage(off, 0, 0);
+    c.restore();
+    return r;
   }
 
   /*
@@ -332,11 +486,11 @@
         if (!e) { e = { cur: { text, t0: agora }, saindo: [] }; estado.set(id, e); }
         else if (e.cur.text !== text) {
           const tinha = !!e.cur.text;
-          if (tinha) e.saindo.push({ text: e.cur.text, t0: agora, s });
+          if (tinha) e.saindo.push({ text: e.cur.text, t0: agora, tin: agora - e.cur.t0 });
           const atraso = tinha && s.exitAnim !== 'nenhuma' ? Math.min(0.5, (s.exitDur == null ? 0.35 : s.exitDur) * 0.55) : 0;
           e.cur = { text, t0: agora + atraso };
         }
-        e.saindo = e.saindo.filter((o) => desenhar(c, s, o.text, W, H, alpha, 'out', agora - o.t0, agora));
+        e.saindo = e.saindo.filter((o) => desenhar(c, s, o.text, W, H, alpha, 'out', agora - o.t0, agora, o.tin));
         if (e.cur.text && agora >= e.cur.t0) desenhar(c, s, e.cur.text, W, H, alpha, 'in', agora - e.cur.t0, agora);
       },
     };

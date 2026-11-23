@@ -104,8 +104,8 @@
     [1024, 768, 'Projetor 4:3'], [1400, 1050, 'Projetor 4:3 (SXGA+)'], [1280, 800, 'Projetor 16:10'],
     [1920, 1200, '16:10 (WUXGA)'], [1080, 1920, 'Vertical 9:16'],
   ];
-  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera / NDI', screen: 'Captura de tela', holyrics: 'Holyrics ao vivo (letra)', obs: 'Cena / fonte do OBS', holybg: 'Holyrics ao vivo (fundo)' };
-  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS', obs: 'OBS', holybg: 'FUNDO HOLYRICS' };
+  const TYPE_LABEL = { video: 'Vídeo', image: 'Imagem', text: 'Texto / Letra', color: 'Cor', camera: 'Câmera / NDI', screen: 'Captura de tela', holyrics: 'Holyrics ao vivo (letra)', obs: 'Cena / fonte do OBS', holybg: 'Holyrics ao vivo (fundo)', gerador: 'Fundo animado (gerador)' };
+  const BADGE = { video: 'VÍDEO', image: 'IMG', text: 'TEXTO', color: 'COR', camera: 'CÂM', screen: 'TELA', holyrics: 'HOLYRICS', obs: 'OBS', holybg: 'FUNDO HOLYRICS', gerador: 'GERADOR' };
   const isTextLike = (clip) => !!clip && (clip.type === 'text' || clip.type === 'holyrics');
   const defaultHolyrics = () => ({ host: '127.0.0.1', port: 8091, token: '', arrows: true, useOrder: true, mediaDir: '' });
   const defaultObs = () => ({ quality: 'alta' });
@@ -114,7 +114,7 @@
 
   const defaultFx = () => ({
     brightness: 100, contrast: 100, saturate: 100, hue: 0, blur: 0, zoom: 100,
-    gray: 0, vignette: 0, tint: 0, tintColor: '#f5a524', mirror: false, posX: 0, posY: 0,
+    gray: 0, vignette: 0, tint: 0, tintColor: '#f5a524', mirror: false, posX: 0, posY: 0, grain: 0,
   });
   // "Looks" de camada no estilo das igrejas que usam Resolume (IMAG = câmera no telão)
   const FX_PRESETS = {
@@ -125,6 +125,8 @@
     'Tom frio': { tint: 22, tintColor: '#2f7bff', saturate: 90 },
     'Fundo desfocado (atrás da letra)': { blur: 14, brightness: 60, vignette: 30 },
     'Quadro no canto (PiP)': { zoom: 35, posX: 30, posY: 28 },
+    'Filme antigo (grão)': { grain: 45, contrast: 112, saturate: 85, vignette: 45 },
+    'Evento vermelho': { tint: 28, tintColor: '#c4161c', contrast: 118, grain: 30, vignette: 50 },
   };
   const defaultTextStyle = () => ({
     font: 'Arial', size: 80, weight: 700, italic: false, uppercase: false, letterSpacing: 0,
@@ -134,9 +136,10 @@
     box: 'none', boxColor: '#000000', boxOpacity: 0.55,
     margin: 90, lineHeight: 1.2,
     anim: 'fade', animDur: 0.5, stagger: 0.05, exitAnim: 'fade', exitDur: 0.35, idle: 'nenhum',
+    desgaste: 0, font2: 'Great Vibes', font2Scale: 1.5, condensar: 1,
   });
   // Visuais prontos inspirados em operações de letras com Resolume em igrejas
-  const BASE_LOOK = { italic: false, uppercase: false, letterSpacing: 0, gradient: false, glow: 0, outline: 0, shadow: true, box: 'none', idle: 'nenhum', stagger: 0.05, lineHeight: 1.2, align: 'center' };
+  const BASE_LOOK = { italic: false, uppercase: false, letterSpacing: 0, gradient: false, glow: 0, outline: 0, shadow: true, box: 'none', idle: 'nenhum', stagger: 0.05, lineHeight: 1.2, align: 'center', desgaste: 0, color: '#ffffff', condensar: 1 };
   const TEXT_PRESETS = {
     'Letra clássica': { font: 'Arial', weight: 700, size: 80, outline: 3, valign: 'middle', margin: 90, anim: 'fade', animDur: 0.5, exitAnim: 'fade', exitDur: 0.35 },
     'Worship moderno': { font: 'Montserrat', weight: 700, size: 76, uppercase: true, letterSpacing: 6, valign: 'middle', margin: 120, anim: 'desfoque', animDur: 0.8, exitAnim: 'desfoque', exitDur: 0.45, idle: 'respirar' },
@@ -148,6 +151,9 @@
     'Brilho dourado': { font: 'Cinzel', weight: 700, size: 74, uppercase: true, gradient: true, color: '#fff6d5', color2: '#d9a521', glow: 22, glowColor: '#ffb300', valign: 'middle', margin: 120, anim: 'tracking', animDur: 1.0, exitAnim: 'fade', exitDur: 0.5, idle: 'brilho' },
     'Rodapé transmissão': { font: 'Montserrat', weight: 700, size: 56, uppercase: true, letterSpacing: 2, valign: 'bottom', margin: 64, lineHeight: 1.25, box: 'degrade', boxColor: '#000000', boxOpacity: 0.8, anim: 'subir', animDur: 0.5, stagger: 0.1, exitAnim: 'fade', exitDur: 0.3 },
     'Legenda (rodapé)': { font: 'Inter', weight: 700, size: 54, valign: 'bottom', box: 'band', boxOpacity: 0.6, shadow: false, margin: 50, anim: 'subir', animDur: 0.45, stagger: 0.08, exitAnim: 'fade', exitDur: 0.3 },
+    'Palavra gigante': { font: 'Anton', weight: 400, condensar: 0.62, size: 300, uppercase: true, letterSpacing: 2, color: '#f1efe9', glow: 28, glowColor: '#ffffff', shadow: false, desgaste: 22, margin: 60, anim: 'gigante', stagger: 0.55, exitAnim: 'fade', exitDur: 0.25 },
+    'Título desgastado': { font: 'Big Shoulders Display', weight: 900, size: 280, uppercase: true, gradient: true, color: '#d8261b', color2: '#1c0302', shadow: false, desgaste: 30, valign: 'middle', margin: 80, lineHeight: 0.95, anim: 'zoom', animDur: 0.9, exitAnim: 'fade', exitDur: 0.4 },
+    'Assinatura (reta + manuscrita)': { font: 'Montserrat', weight: 700, size: 120, uppercase: true, color: '#efe2cc', font2: 'Great Vibes', font2Scale: 2.1, glow: 12, glowColor: '#ffcf8a', shadow: true, desgaste: 15, valign: 'middle', margin: 100, lineHeight: 0.95, anim: 'desfoque', animDur: 1.0, exitAnim: 'desfoque', exitDur: 0.5, idle: 'respirar' },
     'Versículo': { font: 'Lora', weight: 400, size: 64, valign: 'middle', box: 'box', boxOpacity: 0.5, margin: 140, anim: 'fade', animDur: 0.7, exitAnim: 'fade', exitDur: 0.4 },
   };
 
@@ -212,6 +218,7 @@
       }
       if (c.type === 'text') { c.slide = c.slide || 0; c.text = c.text || ''; }
       if (c.type === 'obs') { c.fps = +c.fps || 10; c.res = c.res || 'media'; }
+      if (c.type === 'gerador') { const d = newGerador(c.kind || 'cortina'); for (const k of Object.keys(d)) if (c[k] === undefined) c[k] = d[k]; }
       if (c.type === 'holybg') { c.fit = c.fit || 'cover'; if (typeof c.transition !== 'number') c.transition = 0.8; }
       if (c.type === 'video') { c.speed = c.speed || 1; c.volume = c.volume == null ? 1 : c.volume; c.loop = c.loop !== false; }
       if (!c.fit && !isTextLike(c) && c.type !== 'color') c.fit = 'cover';
@@ -521,6 +528,7 @@
   function isOpaque(clip) {
     if (!clip) return false;
     if (clip.type === 'holybg') return !!HolyBg.cur;
+    if (clip.type === 'gerador') return clip.kind !== 'particulas';
     if (clip.type === 'color') return true;
     if (isTextLike(clip)) return false;
     if (clip.fit === 'contain') return false;
@@ -566,6 +574,8 @@
       case 'holyrics':
         drawTextClip(c, clip, alpha, now, W, H);
         return true;
+      case 'gerador':
+        return drawGerador(c, clip, alpha, now, W, H);
       case 'holybg':
         return drawHolyBg(c, clip, alpha, now, W, H);
       default: {
@@ -607,15 +617,16 @@
     }
     if (cur) drew = drawClip(c, cur, p, now, p * layerGain, W, H) || drew;
     c.globalAlpha = 1;
-    if (drew) layerPostFx(c, layer.fx, W, H);
+    if (drew) layerPostFx(c, layer.fx, W, H, now);
     return drew ? L.canvas : null;
   }
 
   // vinheta e tom de cor (só onde a camada tem imagem)
-  function layerPostFx(c, fx, W, H) {
-    if (!(fx.vignette > 0) && !(fx.tint > 0)) return;
+  function layerPostFx(c, fx, W, H, now) {
+    if (!(fx.vignette > 0) && !(fx.tint > 0) && !(fx.grain > 0)) return;
     c.save();
     c.globalCompositeOperation = 'source-atop';
+    if (fx.grain > 0) aplicarGrao(c, fx.grain, W, H, now);
     if (fx.tint > 0) {
       c.globalAlpha = Math.min(1, fx.tint / 100);
       c.fillStyle = fx.tintColor || '#f5a524';
@@ -846,6 +857,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     else if (clip.type === 'holyrics') thumb = `<div class="tthumb holy">${esc(Holy.text || (Holy.status === 'ok' ? '(nada no ar no Holyrics)' : 'Holyrics desconectado'))}</div>`;
     else if (clip.type === 'color') thumb = `<div class="cthumb" style="background:${esc(colorCss(clip))}"></div>`;
     else if (clip.type === 'camera') thumb = `<div class="ithumb">${clip.obsVirtual ? '🎥' : '📷'}</div>`;
+    else if (clip.type === 'gerador') thumb = `<div class="cthumb" style="background:${esc(GERADORES[clip.kind] ? GERADORES[clip.kind].css(clip) : '#000')}"></div><div class="ithumb" style="font-size:18px">✨</div>`;
     else if (clip.type === 'holybg') thumb = HolyBg.thumb ? `<img src="${HolyBg.thumb}" draggable="false" alt="">` : `<div class="ithumb">🎞</div>`;
     else if (clip.type === 'obs') thumb = clip.thumb ? `<img src="${clip.thumb}" draggable="false" alt="">` : `<div class="ithumb">📺</div>`;
     else if (clip.type === 'screen') thumb = `<div class="ithumb">🖥</div>`;
@@ -1214,6 +1226,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
         if (!P.holyrics.token) openHolyDialog();
         return;
       case 'holysplit': setupHolyLayers(); return;
+      case 'gerador': placeClip(layer, col, newGerador('cortina')); return;
     }
   });
   $('#fileInput').addEventListener('change', (e) => {
@@ -1277,7 +1290,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
           const l = layerOfClip(clip.id);
           if (l && !isLive(clip.id)) triggerClip(l, clip.id, { keepSlide: true });
         },
-      }, h('span', { class: 'n' }, String(i + 1)), clip.style.uppercase ? s.toLocaleUpperCase('pt-BR') : s));
+      }, h('span', { class: 'n' }, String(i + 1)), (clip.style.uppercase ? s.toLocaleUpperCase('pt-BR') : s).replace(/^\s*~\s*/gm, '')));
     });
     panel.append(head, grid);
     updateSlidesActive(false);
@@ -1399,6 +1412,9 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
       case 'obs':
         obsClipControls(sec, clip);
         break;
+      case 'gerador':
+        geradorControls(sec, clip);
+        break;
       case 'holybg':
         holyBgControls(sec, clip);
         break;
@@ -1516,12 +1532,26 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
         return h('div', { class: 'inline' }, r, colorInput(s, 'glowColor'), out);
       })(), h('span')));
     sec.append(checkF('Sombra', s, 'shadow'));
+    sec.append(rangeF('Desgaste (textura)', s, 'desgaste', 0, 80, 1, null, (v) => v + '%'));
+    sec.append(h('h4', {}, 'Fonte manuscrita (linhas que começam com ~)'));
+    const f2 = h('select', { onchange: () => { s.font2 = f2.value; TX.garantirFonte(s.font2); scheduleSave(); } },
+      ['Great Vibes', 'Pinyon Script', 'Dancing Script', 'Caveat', 'Playfair Display', ...P.fontesLocais].map((f) => h('option', { value: f }, f)));
+    f2.value = s.font2 || 'Great Vibes';
+    sec.append(field('Manuscrita', f2));
+    sec.append(rangeF('Tamanho dela', s, 'font2Scale', 0.8, 2.5, 0.05, null, (v) => '×' + v.toFixed(2)));
+    sec.append(h('div', { class: 'hint' }, 'Ex.: “ATÉ SERMOS” numa linha e “~um” na outra: a segunda sai em letra manuscrita, encaixada por cima. Funciona também no texto vindo do Holyrics.'));
 
     // ---- animação
     sec.append(h('h4', {}, 'Animação'));
     const opts = (o) => Object.entries(o);
     sec.append(selectF('Entrada', s, 'anim', opts(TX.ANIMS), () => { testar(); redo(); }));
-    if (s.anim !== 'maquina' && s.anim !== 'nenhuma') sec.append(rangeF('Duração', s, 'animDur', 0.1, 3, 0.05, null, (v) => v.toFixed(2) + 's'));
+    if (s.anim === 'gigante') {
+      sec.append(rangeF('Tempo por palavra', s, 'stagger', 0.15, 2, 0.05, null, (v) => v.toFixed(2) + 's'));
+      sec.append(checkF('Repetir as palavras em loop', s, 'gigLoop'));
+      sec.append(rangeF('Condensar', s, 'condensar', 0.3, 1.2, 0.02, null, (v) => Math.round(v * 100) + '%'));
+      if (s.gigLoop === undefined) s.gigLoop = true;
+    }
+    if (s.anim !== 'maquina' && s.anim !== 'nenhuma' && s.anim !== 'gigante') sec.append(rangeF('Duração', s, 'animDur', 0.1, 3, 0.05, null, (v) => v.toFixed(2) + 's'));
     if (['subir', 'cair', 'palavra', 'letra', 'maquina', 'escala', 'tracking'].includes(s.anim)) {
       sec.append(rangeF(s.anim === 'maquina' ? 'Velocidade' : 'Atraso entre partes', s, 'stagger', 0.01, 0.4, 0.01, null, (v) => v.toFixed(2) + 's'));
     }
@@ -1562,6 +1592,7 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
     sec.append(rangeF('Desfoque', fx, 'blur', 0, 30, 0.5, null, (v) => v + 'px'));
     sec.append(rangeF('Preto e branco', fx, 'gray', 0, 100, 1, null, pct));
     sec.append(rangeF('Vinheta', fx, 'vignette', 0, 100, 1, null, pct));
+    sec.append(rangeF('Grão de filme', fx, 'grain', 0, 100, 1, null, pct));
     sec.append(h('div', { class: 'f' }, h('span', { class: 'fl' }, 'Tom de cor'),
       (() => {
         const out = h('span', { class: 'fv' }, fx.tint + '%');
@@ -1596,7 +1627,8 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   // =====================================================================
   function setupTopbar() {
     const sel = $('#selRes');
-    sel.innerHTML = RESOLUTIONS.map(([w, hh, n]) => `<option value="${w}x${hh}">${w}×${hh} — ${n}</option>`).join('');
+    sel.innerHTML = RESOLUTIONS.map(([w, hh, n]) => `<option value="${w}x${hh}">${w}×${hh} — ${n}</option>`).join('') +
+      '<option value="custom">Personalizada (telão de LED)…</option>';
     const cur = `${P.width}x${P.height}`;
     if (!RESOLUTIONS.some(([w, hh]) => `${w}x${hh}` === cur)) sel.insertAdjacentHTML('afterbegin', `<option value="${cur}">${P.width}×${P.height}</option>`);
     sel.value = cur;
@@ -1606,6 +1638,15 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   }
 
   $('#selRes').addEventListener('change', (e) => {
+    if (e.target.value === 'custom') {
+      const r = prompt('Resolução do telão (largura x altura em pixels). Ex.: 2992x768 para um LED panorâmico:', `${P.width}x${P.height}`);
+      const m = /^\s*(\d{3,5})\s*[x×*]\s*(\d{3,5})\s*$/i.exec(r || '');
+      if (!m) { setupTopbar(); return; }
+      P.width = Math.min(8192, +m[1]); P.height = Math.min(8192, +m[2]);
+      TX.limparCache(); setupTopbar(); scheduleSave();
+      toast(`Resolução do programa: ${P.width}×${P.height}`);
+      return;
+    }
     const [w, hh] = e.target.value.split('x').map(Number);
     P.width = w; P.height = hh;
     TX.limparCache();
@@ -2106,6 +2147,252 @@ font:16px system-ui,Arial,sans-serif;padding:10px 18px;border-radius:8px;border:
   $('#btnHoly').addEventListener('click', () => openHolyDialog());
   $('#holyDlg').addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target === e.currentTarget) $('#holyDlg').close(); });
 
+
+
+  // =====================================================================
+  // Geradores de fundo animado (como os "generators" do Resolume)
+  // =====================================================================
+  function hash2(i, j) {
+    let h = (i * 374761393 + j * 668265263) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  }
+  const smooth = (t) => t * t * (3 - 2 * t);
+  function noise2(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+    const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+    const u = smooth(xf), v = smooth(yf);
+    return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+  }
+  function noise3(x, y, z) {
+    const zi = Math.floor(z), zf = smooth(z - zi);
+    const n1 = noise2(x + zi * 17.13, y + zi * 31.71), n2 = noise2(x + (zi + 1) * 17.13, y + (zi + 1) * 31.71);
+    return n1 + (n2 - n1) * zf;
+  }
+  function hexRgb(hex) {
+    const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+    const n = m ? parseInt(m[1], 16) : 0;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const rgba = (rgb, a, mul = 1) => `rgba(${Math.min(255, rgb[0] * mul) | 0},${Math.min(255, rgb[1] * mul) | 0},${Math.min(255, rgb[2] * mul) | 0},${a})`;
+
+  const GERADORES = {
+    cortina: {
+      nome: 'Cortina de luz (faixas verticais)', cor: '#d11a12', cor2: '#ff8a3c',
+      css: (g) => `repeating-linear-gradient(90deg, ${g.color} 0 6px, #2a0503 6px 12px)`,
+      draw(c, g, t, W, H) {
+        const rgb = hexRgb(g.color), rgb2 = hexRgb(g.color2);
+        c.fillStyle = rgba(rgb, 1, 0.12); c.fillRect(0, 0, W, H);
+        const N = 54, bw = W / N;
+        c.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < N; i++) {
+          const b = 0.25 + 0.75 * Math.pow(noise2(i * 0.73, t * 0.6), 1.6) * g.intensity;
+          const x = i * bw + Math.sin(t * 0.25 + i) * bw * 0.15;
+          const w = bw * (0.35 + 0.55 * noise2(i * 1.7, 3.3));
+          const gr = c.createLinearGradient(x, 0, x + w, 0);
+          gr.addColorStop(0, rgba(rgb, 0)); gr.addColorStop(0.5, rgba(i % 7 === 3 ? rgb2 : rgb, b * 0.8)); gr.addColorStop(1, rgba(rgb, 0));
+          c.fillStyle = gr; c.fillRect(x, 0, w, H);
+        }
+        const glow = c.createRadialGradient(W / 2, H * 0.5, 0, W / 2, H * 0.5, W * 0.6);
+        glow.addColorStop(0, rgba(rgb2, 0.25 * g.intensity)); glow.addColorStop(1, rgba(rgb2, 0));
+        c.fillStyle = glow; c.fillRect(0, 0, W, H);
+        c.globalCompositeOperation = 'source-over';
+        const vg = c.createLinearGradient(0, 0, 0, H);
+        vg.addColorStop(0, 'rgba(0,0,0,0.85)'); vg.addColorStop(0.18, 'rgba(0,0,0,0)'); vg.addColorStop(0.82, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.85)');
+        c.fillStyle = vg; c.fillRect(0, 0, W, H);
+      },
+    },
+    topografico: {
+      nome: 'Linhas topográficas', cor: '#c4161c', cor2: '#ffffff',
+      css: (g) => `repeating-radial-gradient(circle at 40% 60%, ${g.color} 0 2px, #160203 2px 9px)`,
+      draw(c, g, t, W, H) {
+        const rgb = hexRgb(g.color), rgb2 = hexRgb(g.color2);
+        c.fillStyle = rgba(rgb, 1, 0.07); c.fillRect(0, 0, W, H);
+        const glow = c.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, W * 0.7);
+        glow.addColorStop(0, rgba(rgb, 0.22)); glow.addColorStop(1, rgba(rgb, 0));
+        c.fillStyle = glow; c.fillRect(0, 0, W, H);
+        // campo de ruído e curvas de nível (marching squares)
+        const GW = 96, GH = Math.round(96 * H / W), sx = W / GW, sy = H / GH;
+        const f = new Float32Array((GW + 1) * (GH + 1));
+        for (let j = 0; j <= GH; j++) for (let i = 0; i <= GW; i++) {
+          const x = i * 0.055, y = j * 0.055;
+          f[j * (GW + 1) + i] = noise3(x, y, t * 0.12) * 0.65 + noise3(x * 2.1, y * 2.1, t * 0.18 + 5) * 0.35;
+        }
+        c.lineWidth = Math.max(1, 1.6 * H / 1080);
+        c.lineJoin = 'round';
+        const niveis = 13;
+        for (let l = 1; l < niveis; l++) {
+          const iso = 0.2 + 0.6 * l / niveis;
+          c.strokeStyle = rgba(rgb, (l % 4 === 0 ? 0.85 : 0.45) * g.intensity, l % 4 === 0 ? 1.4 : 1);
+          c.beginPath();
+          for (let j = 0; j < GH; j++) for (let i = 0; i < GW; i++) {
+            const a = f[j * (GW + 1) + i], b = f[j * (GW + 1) + i + 1], d = f[(j + 1) * (GW + 1) + i], e = f[(j + 1) * (GW + 1) + i + 1];
+            const idx = (a > iso ? 8 : 0) | (b > iso ? 4 : 0) | (e > iso ? 2 : 0) | (d > iso ? 1 : 0);
+            if (idx === 0 || idx === 15) continue;
+            const x0 = i * sx, y0 = j * sy;
+            const top = [x0 + sx * (iso - a) / (b - a), y0], right = [x0 + sx, y0 + sy * (iso - b) / (e - b)];
+            const bot = [x0 + sx * (iso - d) / (e - d), y0 + sy], left = [x0, y0 + sy * (iso - a) / (d - a)];
+            const seg = (p, q) => { c.moveTo(p[0], p[1]); c.lineTo(q[0], q[1]); };
+            switch (idx) {
+              case 1: case 14: seg(left, bot); break;
+              case 2: case 13: seg(bot, right); break;
+              case 3: case 12: seg(left, right); break;
+              case 4: case 11: seg(top, right); break;
+              case 6: case 9: seg(top, bot); break;
+              case 7: case 8: seg(left, top); break;
+              case 5: seg(left, top); seg(bot, right); break;
+              case 10: seg(top, right); seg(left, bot); break;
+            }
+          }
+          c.stroke();
+        }
+        if (g.extra) { // traços geométricos finos
+          c.strokeStyle = rgba(rgb2, 0.28); c.lineWidth = Math.max(1, H / 900);
+          for (let i = 0; i < 4; i++) {
+            c.beginPath();
+            c.ellipse(W * (0.3 + i * 0.15), H * (0.5 + 0.1 * Math.sin(i)), W * (0.35 + i * 0.08), H * (0.5 + i * 0.1), t * 0.03 * (i % 2 ? 1 : -1) + i, 0, Math.PI * 2);
+            c.stroke();
+          }
+          c.beginPath(); c.moveTo(0, H * 0.15); c.lineTo(W, H * 0.85); c.moveTo(W * 0.1, H); c.lineTo(W * 0.75, 0); c.stroke();
+        }
+      },
+    },
+    papel: {
+      nome: 'Papel texturizado', cor: '#ece4d3', cor2: '#b9ab90',
+      css: (g) => g.color,
+      cache: null,
+      draw(c, g, t, W, H) {
+        const key = `${W}x${H}|${g.color}|${g.color2}`;
+        if (!this.cache || this.cache.key !== key) {
+          const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+          const x = cv.getContext('2d');
+          const rgb = hexRgb(g.color), rgb2 = hexRgb(g.color2);
+          x.fillStyle = g.color; x.fillRect(0, 0, W, H);
+          let sd = 99; const r = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+          for (let i = 0; i < 60; i++) { // manchas suaves
+            const cx = r() * W, cy = r() * H, rr = (60 + r() * 260) * H / 1080;
+            const gr = x.createRadialGradient(cx, cy, 0, cx, cy, rr);
+            gr.addColorStop(0, rgba(rgb2, 0.08 + r() * 0.08)); gr.addColorStop(1, rgba(rgb2, 0));
+            x.fillStyle = gr; x.fillRect(cx - rr, cy - rr, rr * 2, rr * 2);
+          }
+          const img = x.getImageData(0, 0, W, H), d = img.data; // granulado
+          for (let i = 0; i < d.length; i += 4) { const n = (r() - 0.5) * 26; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+          x.putImageData(img, 0, 0);
+          x.strokeStyle = rgba(rgb2, 0.12); // fibras
+          for (let i = 0; i < 500; i++) { x.lineWidth = 0.6; const px0 = r() * W, py0 = r() * H, a = r() * Math.PI; x.beginPath(); x.moveTo(px0, py0); x.lineTo(px0 + Math.cos(a) * 14, py0 + Math.sin(a) * 14); x.stroke(); }
+          const vg = x.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, Math.hypot(W, H) / 2);
+          vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(60,40,20,0.28)');
+          x.fillStyle = vg; x.fillRect(0, 0, W, H);
+          this.cache = { key, cv };
+        }
+        c.drawImage(this.cache.cv, 0, 0);
+      },
+    },
+    feixes: {
+      nome: 'Feixes de luz', cor: '#ffffff', cor2: '#4a6bff',
+      css: (g) => `linear-gradient(160deg, #05060c 40%, ${g.color2} 100%)`,
+      draw(c, g, t, W, H) {
+        const rgb = hexRgb(g.color), rgb2 = hexRgb(g.color2);
+        c.fillStyle = '#04050a'; c.fillRect(0, 0, W, H);
+        const fundo = c.createLinearGradient(0, H, 0, 0);
+        fundo.addColorStop(0, rgba(rgb2, 0.35)); fundo.addColorStop(1, rgba(rgb2, 0));
+        c.fillStyle = fundo; c.fillRect(0, 0, W, H);
+        c.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 7; i++) {
+          const ox = W * (0.1 + 0.8 * i / 6) + Math.sin(t * 0.4 + i * 1.7) * W * 0.05;
+          const ang = Math.sin(t * 0.35 + i * 2.1) * 0.45;
+          const len = H * 1.4, half = W * 0.06;
+          const ex = ox + Math.sin(ang) * len, ey = Math.cos(ang) * len;
+          const gr = c.createLinearGradient(ox, 0, ex, ey);
+          gr.addColorStop(0, rgba(i % 3 === 1 ? rgb2 : rgb, 0.4 * g.intensity)); gr.addColorStop(1, rgba(rgb, 0));
+          c.fillStyle = gr;
+          c.beginPath(); c.moveTo(ox - 6, 0); c.lineTo(ox + 6, 0);
+          c.lineTo(ex + half * Math.cos(ang), ey - half * Math.sin(ang)); c.lineTo(ex - half * Math.cos(ang), ey + half * Math.sin(ang)); c.fill();
+        }
+        c.globalCompositeOperation = 'source-over';
+      },
+    },
+    particulas: {
+      nome: 'Partículas (por cima, fundo transparente)', cor: '#ffd9a0', cor2: '#ff6a3c',
+      css: (g) => `radial-gradient(circle, ${g.color} 0 3px, transparent 4px) 0 0/22px 22px, #111`,
+      draw(c, g, t, W, H) {
+        const rgb = hexRgb(g.color), rgb2 = hexRgb(g.color2);
+        c.globalCompositeOperation = 'lighter';
+        const n = Math.round(110 * g.intensity) + 10;
+        for (let i = 0; i < n; i++) {
+          const sp = 0.02 + hash2(i, 1) * 0.05;
+          const y = (1 - ((hash2(i, 2) + t * sp) % 1)) * (H + 80) - 40;
+          const x = hash2(i, 3) * W + Math.sin(t * 0.5 + i) * 30 * H / 1080;
+          const r = (1.5 + hash2(i, 4) * (hash2(i, 5) > 0.85 ? 22 : 5)) * H / 1080;
+          const a = (0.25 + 0.6 * hash2(i, 6)) * (0.6 + 0.4 * Math.sin(t * 1.5 + i));
+          const gr = c.createRadialGradient(x, y, 0, x, y, r * 2.2);
+          gr.addColorStop(0, rgba(i % 5 === 0 ? rgb2 : rgb, a)); gr.addColorStop(1, rgba(rgb, 0));
+          c.fillStyle = gr; c.fillRect(x - r * 2.2, y - r * 2.2, r * 4.4, r * 4.4);
+        }
+        c.globalCompositeOperation = 'source-over';
+      },
+    },
+  };
+
+  function newGerador(kind) {
+    const g = GERADORES[kind] || GERADORES.cortina;
+    return { id: uid(), type: 'gerador', kind: GERADORES[kind] ? kind : 'cortina', name: g.nome.replace(/\s*\(.*\)$/, ''), color: g.cor, color2: g.cor2, speed: 1, intensity: 1, extra: true };
+  }
+
+  function drawGerador(c, clip, alpha, now, W, H) {
+    const g = GERADORES[clip.kind];
+    if (!g || alpha <= 0.001) return false;
+    c.save();
+    c.globalAlpha = alpha;
+    g.draw.call(g, c, clip, (now / 1000) * (clip.speed || 1), W, H);
+    c.restore();
+    return true;
+  }
+
+  function geradorControls(sec, clip) {
+    const reCell = () => refreshCell(clip);
+    sec.append(selectF('Tipo', clip, 'kind', Object.entries(GERADORES).map(([k, g]) => [k, g.nome]), () => {
+      const g = GERADORES[clip.kind]; clip.color = g.cor; clip.color2 = g.cor2; reCell(); renderInspector();
+    }));
+    sec.append(colorF('Cor principal', clip, 'color', reCell));
+    sec.append(colorF('Cor de apoio', clip, 'color2', reCell));
+    sec.append(rangeF('Velocidade', clip, 'speed', 0, 4, 0.05, null, (v) => v.toFixed(2) + '×'));
+    sec.append(rangeF('Intensidade', clip, 'intensity', 0.2, 1.5, 0.05, null, (v) => Math.round(v * 100) + '%'));
+    if (clip.kind === 'topografico') sec.append(checkF('Traços geométricos finos', clip, 'extra'));
+    sec.append(h('div', { class: 'hint' }, 'Fundo gerado pelo programa, sem arquivo de vídeo. Combine com “Grão de filme” e “Vinheta” na camada para um visual de evento.'));
+  }
+
+  // grão de filme (com riscos quando alto)
+  const graoTiles = [];
+  function aplicarGrao(c, nivel, W, H, now) {
+    if (!graoTiles.length) {
+      for (let k = 0; k < 4; k++) {
+        const t = document.createElement('canvas'); t.width = t.height = 256;
+        const x = t.getContext('2d'), img = x.createImageData(256, 256), d = img.data;
+        for (let i = 0; i < d.length; i += 4) { const v = Math.random() < 0.5 ? 0 : 255; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = Math.random() * 255; }
+        x.putImageData(img, 0, 0);
+        graoTiles.push(t);
+      }
+    }
+    const f = Math.floor(now / 42);
+    const tile = graoTiles[f % graoTiles.length];
+    c.save();
+    c.globalAlpha = Math.min(0.6, nivel / 100 * 0.45);
+    const pat = c.createPattern(tile, 'repeat');
+    c.translate((f * 97) % 256, (f * 53) % 256);
+    c.fillStyle = pat;
+    c.fillRect(-256, -256, W + 512, H + 512);
+    c.restore();
+    if (nivel > 35) {
+      c.save();
+      c.globalAlpha = Math.min(0.35, (nivel - 35) / 100);
+      c.strokeStyle = (f % 2) ? '#000' : '#fff';
+      c.lineWidth = Math.max(1, H / 1080);
+      const n = 1 + (f % 3);
+      for (let i = 0; i < n; i++) { const x = hash2(f, i) * W; c.beginPath(); c.moveTo(x, 0); c.lineTo(x + (hash2(i, f) - 0.5) * 20, H); c.stroke(); }
+      c.restore();
+    }
+  }
 
   // =====================================================================
   // Fundo do Holyrics ao vivo: segue o fundo que está no ar no Holyrics.
